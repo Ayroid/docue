@@ -25,6 +25,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.ingestion.enrich import run_enrichment
 from app.ingestion.pipeline import run_ingestion
 from app.models.job import (
     KIND_INGESTION,
@@ -95,11 +96,32 @@ def run_ingestion_job(
             _fail(db, job, f"{type(exc).__name__}: {exc}")
             return
 
+        # ── enrichment: the AI half, and it is allowed to fail ────────────
+        # Runs after the structural result is complete and deliberately cannot
+        # move the job to `failed`. Two model calls take 25-50s against a
+        # pipeline that finished in under a second; if Bedrock is down, rate
+        # limited or slow, the template keeps its regions and simply is not yet
+        # searchable by meaning. The warning is recorded so a later pass can
+        # find the rows worth redoing.
+        enrichment_result = None
+        try:
+            job.stage = "enrich"
+            job.progress = 97
+            db.commit()
+            enrichment_result = run_enrichment(db, template, version, data)
+        except Exception as exc:  # noqa: BLE001 - never fails the ingestion
+            logger.warning("enrichment failed for version %s: %s", version_id, exc)
+            db.rollback()
+
         job.status = STATUS_SUCCEEDED
         job.stage = "done"
         job.progress = 100
         job.error = None
-        job.result = result.job_result()
+        job.result = result.job_result() | (
+            {"enrichment": enrichment_result.job_result()}
+            if enrichment_result is not None
+            else {"enrichment": None}
+        )
         # One commit for the schema, the regions, the harvest columns and the
         # job's own success, so a poller never sees `succeeded` against a
         # half-written schema.

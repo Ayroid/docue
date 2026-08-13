@@ -1,11 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import CheckConstraint, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# Pinned to what `cohere.embed-v4:0` returns at output_dimension=1024, and
+# asserted at call time in `app/ai/bedrock.py::embed`. Changing it means
+# re-embedding every row, so it lives next to the column it defines.
+EMBEDDING_DIMENSIONS = 1024
 
 
 class Template(Base):
@@ -27,6 +33,22 @@ class Template(Base):
     # Instruction shape, which is what makes the revision block trustworthy.
     form_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     house_pattern: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # ── generated discovery metadata (plan §9) ────────────────────────────
+    # Written by the LLM metadata pass, not by the uploader. `embedding` is of
+    # these fields concatenated -- never of the document body -- so a template
+    # is found by what it is for rather than by whose data happens to be in it.
+    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    when_to_use: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audience: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIMENSIONS), nullable=True
+    )
+    metadata_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    metadata_prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    embedded_at: Mapped[datetime | None] = mapped_column(nullable=True)
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("template_versions.id", use_alter=True, name="fk_templates_current_version"), nullable=True
     )
