@@ -22,18 +22,75 @@ job row and the S3 object are all removed, because this runs against the shared
 database. Pass `--keep` to leave them for inspection.
 """
 
+import json
 import os
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import httpx  # noqa: E402
 from sqlalchemy import text  # noqa: E402
+
+# Deliberately the standard library rather than httpx or requests. This script
+# would otherwise be the only thing in the repo needing a dependency that is in
+# neither `pyproject.toml` nor `uv.lock` -- which is how `python-docx` once
+# reached `main` declared but unlocked, passing for everyone who happened to
+# have it installed (working agreement §5).
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _send(request: urllib.request.Request, timeout: float) -> tuple[int, object]:
+    """Send a request, returning (status, decoded JSON). Never raises on 4xx/5xx.
+
+    Proxies are bypassed explicitly: on a corporate machine `http_proxy` is set,
+    and routing a call to 127.0.0.1 through Zscaler hangs rather than failing.
+    """
+    try:
+        with _NO_PROXY_OPENER.open(request, timeout=timeout) as response:
+            raw = response.read()
+            return response.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        try:
+            return exc.code, (json.loads(raw) if raw else None)
+        except ValueError:
+            return exc.code, {"detail": raw[:400].decode("utf-8", "replace")}
+
+
+def _get_json(url: str, timeout: float = 30) -> tuple[int, object]:
+    return _send(urllib.request.Request(url, method="GET"), timeout)
+
+
+def _post_file(
+    url: str, filename: str, data: bytes, mime: str, timeout: float = 120
+) -> tuple[int, object]:
+    """POST one file as multipart/form-data under the field name `file`."""
+    boundary = f"----TrackACheck{uuid.uuid4().hex}"
+    body = b"".join(
+        (
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode(),
+            f"Content-Type: {mime}\r\n\r\n".encode(),
+            data,
+            f"\r\n--{boundary}--\r\n".encode(),
+        )
+    )
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(body)),
+        },
+    )
+    return _send(request, timeout)
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES_DIR = ROOT.parent / "Files"
@@ -105,9 +162,9 @@ def _wait_for_health(base: str, server: subprocess.Popen) -> bool:
             print((server.stdout.read() if server.stdout else "")[-2000:])
             return False
         try:
-            if httpx.get(f"{base}/health", timeout=3).status_code == 200:
+            if _get_json(f"{base}/health", timeout=3)[0] == 200:
                 return True
-        except httpx.HTTPError:
+        except OSError:
             time.sleep(0.4)
     return False
 
@@ -205,17 +262,14 @@ def main() -> int:
         # database, and unique so repeat runs don't collide on the storage key.
         filename = f"{sample.stem} (track-a check {uuid.uuid4().hex[:8]}){sample.suffix}"
         started = time.monotonic()
-        response = httpx.post(
-            f"{base}/api/v1/templates",
-            files={"file": (filename, data, mime)},
-            timeout=120,
+        status_code, body = _post_file(
+            f"{base}/api/v1/templates", filename, data, mime, timeout=120
         )
         upload_latency = time.monotonic() - started
 
-        if response.status_code != 202:
-            print(f"upload returned {response.status_code}: {response.text[:400]}")
+        if status_code != 202:
+            print(f"upload returned {status_code}: {body}")
             return 1
-        body = response.json()
         template_id = uuid.UUID(body["template_id"])
         version_id = uuid.UUID(body["version_id"])
         job_id = uuid.UUID(body["job_id"])
@@ -238,15 +292,12 @@ def main() -> int:
         payload: dict = {}
         while True:
             elapsed = time.monotonic() - poll_started
-            status_response = httpx.get(
+            status_code, payload = _get_json(
                 f"{base}/api/v1/templates/{template_id}/ingestion/{job_id}", timeout=30
             )
-            if status_response.status_code != 200:
-                failures.append(
-                    f"job poll returned {status_response.status_code}: {status_response.text[:200]}"
-                )
+            if status_code != 200:
+                failures.append(f"job poll returned {status_code}: {payload}")
                 break
-            payload = status_response.json()
             stage = payload.get("stage")
             if stage and stage not in seen_stages:
                 seen_stages.append(stage)
@@ -306,15 +357,12 @@ def main() -> int:
 
         # ── the persisted schema ─────────────────────────────────────────
         print()
-        regions_response = httpx.get(
+        status_code, schema = _get_json(
             f"{base}/api/v1/templates/{template_id}/regions", timeout=30
         )
-        if regions_response.status_code != 200:
-            failures.append(
-                f"GET /regions returned {regions_response.status_code}: {regions_response.text[:300]}"
-            )
+        if status_code != 200:
+            failures.append(f"GET /regions returned {status_code}: {schema}")
         else:
-            schema = regions_response.json()
             print(f"GET /regions -> {schema['regions_detected']} regions "
                   f"({schema['regions_writable']} writable), detector={schema['detector_version']}")
             print(f"  form_id={schema['form_id']!r} house_pattern={schema['house_pattern']!r} "
