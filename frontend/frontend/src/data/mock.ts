@@ -1,7 +1,14 @@
 /**
  * Seed data, lifted from the design prototype's script block. This stands in
- * for `/api/v1` until the FastAPI backend lands — every consumer goes through
- * `src/services/`, so swapping this for fetch calls touches one layer.
+ * for `/api/v1` — every consumer goes through `src/services/`, so swapping a
+ * slice of this for real fetch calls touches one layer.
+ *
+ * The backend (as of this writing) only implements template upload and
+ * fetch-by-id (see `src/services/templates.ts`, wired into Upload.tsx and
+ * Admin.tsx's "Verify" action). Everything else this file backs — template
+ * listing/search, categories, versions, generation sessions, QA, drift,
+ * analytics, ACL — has no backend route yet, so it stays mocked here until
+ * those endpoints exist.
  */
 
 export type Fmt = 'DOC' | 'XLS' | 'PPT'

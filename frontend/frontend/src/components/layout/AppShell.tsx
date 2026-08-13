@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useHub } from '@/store/HubProvider'
 import { NOTIFICATIONS, QUEUE } from '@/data/mock'
+import { extOf } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Avatar, FormatChip } from '@/components/common'
@@ -35,6 +36,7 @@ export function AppShell() {
     toast,
     uploadDialogOpen,
     closeUploadDialog,
+    lastUpload,
     logout,
   } = useHub()
   const navigate = useNavigate()
@@ -214,10 +216,12 @@ export function AppShell() {
       >
         <div className="dialog-body">
           <div className="flex items-center gap-3 bg-surface rounded-[12px] py-[13px] px-[15px] mb-4">
-            <FormatChip size={34}>DOC</FormatChip>
+            <FormatChip size={34}>{lastUpload?.fmt ?? 'DOC'}</FormatChip>
             <div className="flex-1 min-w-0">
-              <div className="text-[13.5px] font-semibold">Vendor Assessment Checklist.docx</div>
-              <div className="text-[11.5px] opacity-55">148 KB · uploaded just now</div>
+              <div className="text-[13.5px] font-semibold truncate">
+                {lastUpload ? `${lastUpload.name}${extOf(lastUpload.fmt)}` : 'Vendor Assessment Checklist.docx'}
+              </div>
+              <div className="text-[11.5px] opacity-55">{lastUpload?.meta ?? '148 KB · uploaded just now'}</div>
             </div>
           </div>
           Doc control has been notified by email and in the hub. Once an admin approves it, the template is

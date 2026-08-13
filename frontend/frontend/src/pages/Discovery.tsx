@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CATS, ROLE_PACKS, SEARCH_EXAMPLES, TEMPLATES } from '@/data/mock'
 import { useHub } from '@/store/HubProvider'
 import { filterTemplates } from '@/services/search'
+import { listTemplates, TemplateApiError, type TemplateOut } from '@/services/templates'
 import { Button } from '@/components/ui/button'
 import { FilterTag, Tag } from '@/components/ui/tag'
 import { Segmented } from '@/components/ui/segmented'
 import { TableCard, Table } from '@/components/ui/table'
 import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
-import { TemplateCard } from '@/components/TemplateCard'
+import { RealTemplateCard, TemplateCard } from '@/components/TemplateCard'
 import { SearchIcon } from '@/components/icons'
 
 const VIEW_OPTIONS = [
@@ -35,6 +36,27 @@ export function Discovery() {
     .filter((t): t is (typeof TEMPLATES)[number] => Boolean(t))
 
   const submit = () => navigate(`/search?q=${encodeURIComponent(query)}`)
+
+  const [realTemplates, setRealTemplates] = useState<TemplateOut[]>([])
+  const [realLoading, setRealLoading] = useState(true)
+  const [realError, setRealError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listTemplates()
+      .then((result) => {
+        if (!cancelled) setRealTemplates(result)
+      })
+      .catch((err) => {
+        if (!cancelled) setRealError(err instanceof TemplateApiError ? err.message : 'Could not load templates.')
+      })
+      .finally(() => {
+        if (!cancelled) setRealLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <PageBody>
@@ -90,6 +112,23 @@ export function Discovery() {
           </div>
         </div>
       ) : null}
+
+      <div className="mb-9">
+        <h4 className="mb-[14px]">Real Templates</h4>
+        {realLoading ? (
+          <p className="text-[13px] opacity-60 m-0">Loading templates from the server…</p>
+        ) : realError ? (
+          <p className="text-[13px] text-accent2-700 m-0">{realError}</p>
+        ) : realTemplates.length === 0 ? (
+          <p className="text-[13px] opacity-60 m-0">No templates uploaded to the backend yet.</p>
+        ) : (
+          <div className="grid gap-[18px] grid-cols-[repeat(auto-fill,minmax(290px,1fr))]">
+            {realTemplates.map((t) => (
+              <RealTemplateCard key={t.id} template={t} />
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center gap-4 flex-wrap mb-[14px]">
         <h4 className="m-0">Most used</h4>
