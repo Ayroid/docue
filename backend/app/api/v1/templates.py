@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -21,7 +22,7 @@ from app.schemas.ingestion import (
     RegionOut,
 )
 from app.schemas.template import TemplateOut, TemplateVersionOut
-from app.storage.s3 import delete_file, upload_file
+from app.storage.s3 import delete_file, download_file, upload_file
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -333,3 +334,25 @@ def get_template(template_id: uuid.UUID, db: Session = Depends(get_db)) -> Templ
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template has no version.")
 
     return _to_template_out(template, version)
+
+
+@router.get("/{template_id}/download")
+def download_template(template_id: uuid.UUID, db: Session = Depends(get_db)) -> StreamingResponse:
+    template = db.get(Template, template_id)
+    if template is None or template.status == "deleted":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
+
+    version = db.get(TemplateVersion, template.current_version_id) if template.current_version_id else None
+    if version is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template has no version.")
+
+    try:
+        body = download_file(version.storage_key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    return StreamingResponse(
+        body.iter_chunks(64 * 1024),
+        media_type=version.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{template.original_filename}"'},
+    )
