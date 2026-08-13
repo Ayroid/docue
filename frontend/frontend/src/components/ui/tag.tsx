@@ -35,6 +35,7 @@ export function FilterTag({
       type="button"
       className={cn(
         'tag cursor-pointer whitespace-nowrap border font-[inherit] text-[12px] px-[15px] py-[6px]',
+        'disabled:cursor-not-allowed disabled:opacity-45',
         selected
           ? 'bg-accent text-bg border-accent'
           : 'bg-transparent text-ink border-divider',

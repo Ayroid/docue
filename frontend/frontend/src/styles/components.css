@@ -197,8 +197,13 @@
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-control);
   }
-  .input:hover {
+  .input:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  }
+  .input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background: var(--color-bg);
   }
   .input:focus-visible {
     border-color: var(--color-accent);
@@ -462,4 +467,154 @@
       align-items: stretch;
     }
   }
+
+  /* Client-side document preview (docx-preview/exceljs/pptx-preview render
+     into this surface imperatively, outside React's vdom). */
+  .document-preview-surface {
+    padding: 14px;
+  }
+
+  .xlsx-preview-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .xlsx-preview-tabs button {
+    font: inherit;
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--color-divider);
+    background: transparent;
+    cursor: pointer;
+  }
+  .xlsx-preview-tabs button.active {
+    background: var(--color-accent-100);
+    border-color: var(--color-accent-400);
+    font-weight: 600;
+  }
+
+  /* The sheet is a white canvas, like Excel's. Without this the cells are
+     transparent and the app's background tints the whole grid, which also
+     makes the fills that *are* in the file read as barely-there tints. */
+  .xlsx-preview-body {
+    background: #fff;
+  }
+
+  .xlsx-preview-table {
+    border-collapse: collapse;
+    font-size: 12.5px;
+    background: #fff;
+  }
+  .xlsx-preview-table td {
+    /* Excel's gridline grey rather than the app's divider token — this is
+       sheet furniture, not app chrome. */
+    border: 1px solid #d8d8d8;
+    padding: 4px 8px;
+    white-space: pre-wrap;
+    /* A default only: a cell carrying a fill sets it inline, which wins. */
+    background: #fff;
+  }
+
+  /* — document library: list rail + reader pane — */
+
+  /* The format filter stretches to the rail rather than sitting inline. */
+  .doc-library-filter {
+    display: flex;
+    width: 100%;
+  }
+  .doc-library-filter .seg-opt {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Scrolls on its own so the reader pane beside it stays put while you hunt
+     through a long library. */
+  .doc-library-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 62vh;
+    overflow-y: auto;
+    margin: 0 -6px;
+    padding: 0 6px;
+  }
+
+  .doc-library-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    color: var(--color-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .doc-library-row:hover {
+    background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  }
+  .doc-library-row.active {
+    background: var(--color-accent-100);
+    border-color: var(--color-accent-400);
+  }
+  .doc-library-row:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
+  /* Below the two-column collapse the rail sits above the reader, so a tall
+     list would push the preview off-screen. */
+  @media (max-width: 1100px) {
+    .doc-library-list {
+      max-height: 34vh;
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Rendered document content
+
+   Deliberately outside `@layer base` so it isn't demoted beneath Tailwind's
+   preflight.
+
+   This is a *typography* firewall, not a general reset. Measured against
+   docx-preview 0.4: it already ships its own `.docx`-scoped baseline
+   (`.docx p { margin: 0pt }`, `.docx table { border-collapse: collapse }`,
+   `.docx a { color: inherit }`, the grey backdrop and white page sheets) at
+   specificity (0,1,1), which outranks both preflight and the design system —
+   so paragraph margins, table borders, cell shading, list markers and image
+   sizing all already survive. It emits no `h1`-`h6`/`ul`/`ol`/`li` at all
+   (Word paragraphs become `<p>`, list markers are `::before` counters), so
+   resetting those would be dead weight.
+
+   What genuinely leaks is inheritance: `body` sets the Organic brand font,
+   15px and line-height 1.55, and every run the document doesn't explicitly
+   style picks them up — so a Word file renders in the app's typeface at the
+   app's size. Neutralise it once here, at the boundary, rather than fighting
+   it per element. Anything the document *does* specify still wins, because
+   docx-preview writes those as inline styles or `.docx`-scoped rules.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* docx-preview paints its own mid-grey behind the page sheets. Once the deck
+   is scaled to fit (see `fitToWidth`) that block no longer covers the panel,
+   so it reads as a stray band — let the surface's own backdrop show instead. */
+.doc-render-root .docx-wrapper {
+  background: transparent;
+}
+
+.doc-render-root {
+  /* Word's own default body face, with Carlito (the metric-compatible clone
+     that ships on Linux) and a generic behind it. */
+  font-family: Calibri, Carlito, 'Segoe UI', Arial, sans-serif;
+  font-size: 11pt;
+  font-weight: 400;
+  font-style: normal;
+  line-height: normal;
+  letter-spacing: normal;
+  text-align: left;
+  color: #000;
 }
