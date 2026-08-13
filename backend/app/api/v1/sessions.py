@@ -1,0 +1,538 @@
+"""The fill conversation over HTTP. Plan §6, §10 stages ③-⑦.
+
+The screen that decides the score (`/templates/:id/generate`) talks to exactly
+these endpoints. Everything they do above the deterministic boundary is in
+`app/conversation/` and `app/planning/`; everything below it is
+`compile_and_store`, which shipped before the conversation did and is reused
+rather than reimplemented.
+
+**Where each model call happens, and why there.**
+
+* `POST /sessions` runs the context agent and, on a cache miss, the planner.
+  That is 2 calls, once per session, and the planner half is cached per version
+  so a second session on the same document costs 1.
+* `POST /answer` runs the extractor, and only the extractor. Plan §6 budgets
+  this turn at 1.5s because the user is watching the preview.
+* The deriver runs **once**, on the last answer -- it reasons over the whole
+  document and would blow that budget on every turn for no benefit.
+
+**The schema is re-detected from the stored bytes, not read from
+`document_regions`.** Same reason the compile path does it: a spec must resolve
+against the schema of the exact bytes being compiled, and a stored schema from
+an older detector would resolve `region_id`s against coordinates that no longer
+describe the file. It costs 30-300ms.
+"""
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.api.v1.generate import _fetch, _load, compile_and_store
+from app.conversation.context import assemble_context
+from app.conversation.deriver import derive_values
+from app.conversation.extractor import extract_answer
+from app.conversation.planner import PlannedQuestion, plan_questions
+from app.conversation.state import (
+    SessionProgress,
+    load_question_plan,
+    record_turn,
+    save_question_plan,
+)
+from app.db.session import get_db
+from app.ingestion.detect import detect
+from app.models.generation_session import (
+    STATUS_ABANDONED,
+    STATUS_ACTIVE,
+    STATUS_COMMITTED,
+    STATUS_COMPILED,
+    GenerationSession,
+)
+from app.models.template import Template
+from app.models.template_version import TemplateVersion
+from app.planning.change_planner import plan_change_spec
+from app.schemas.generate import CompileResponse
+from app.schemas.session import (
+    AnswerIn,
+    AnswerOut,
+    ChipOut,
+    ProgressOut,
+    QuestionOut,
+    SessionCompileIn,
+    SessionCreate,
+    SessionCreateOut,
+    SessionOut,
+    SpecOperationPatch,
+    SpecOut,
+    TurnOut,
+)
+
+logger = logging.getLogger("app.sessions")
+
+router = APIRouter(prefix="/sessions", tags=["generation"])
+
+
+# ── loading ───────────────────────────────────────────────────────────────
+
+
+def _session(db: Session, session_id: uuid.UUID) -> GenerationSession:
+    session = db.get(GenerationSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    return session
+
+
+def _context_for(
+    db: Session, session: GenerationSession
+) -> tuple[Template, TemplateVersion, Any]:
+    """The template, its version, and a freshly detected schema of the stored bytes."""
+    template = db.get(Template, session.template_id)
+    version = db.get(TemplateVersion, session.base_version_id)
+    if template is None or version is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The template or version this session was started from no longer exists.",
+        )
+    return template, version, detect(_fetch(version), template.format)
+
+
+def _template_meta(template: Template) -> dict[str, Any]:
+    return {
+        "title": template.title,
+        "purpose": getattr(template, "purpose", None),
+        "when_to_use": getattr(template, "when_to_use", None),
+        "audience": getattr(template, "audience", None),
+    }
+
+
+def _fields_total(schema: Any) -> int:
+    return sum(1 for r in schema.regions if r.editable and not r.protected)
+
+
+def _progress(
+    session: GenerationSession, questions: list[PlannedQuestion], schema: Any
+) -> SessionProgress:
+    derived = (session.derived_values or {}).get("values", {})
+    return SessionProgress(
+        answered=len(session.turns or []),
+        total_questions=len(questions),
+        fields_filled=len(session.filled_values or {}) + len(derived),
+        fields_total=_fields_total(schema),
+    )
+
+
+def _question_out(question: PlannedQuestion) -> QuestionOut:
+    return QuestionOut(**question.as_dict())
+
+
+def _current(
+    session: GenerationSession, questions: list[PlannedQuestion]
+) -> PlannedQuestion | None:
+    answered = len(session.turns or [])
+    return questions[answered] if answered < len(questions) else None
+
+
+def _labels(schema: Any) -> dict[str, str]:
+    return {r.region_id: (r.label or r.region_id) for r in schema.regions}
+
+
+def _session_out(
+    session: GenerationSession,
+    template: Template,
+    questions: list[PlannedQuestion],
+    schema: Any,
+    cls: type = SessionOut,
+    **extra: Any,
+) -> Any:
+    current = _current(session, questions)
+    return cls(
+        session_id=session.id,
+        template_id=session.template_id,
+        base_version_id=session.base_version_id,
+        format=template.format,
+        tier=session.tier,
+        intent=session.user_intent,
+        status=session.status,
+        questions=[_question_out(q) for q in questions],
+        current_question=_question_out(current) if current else None,
+        turns=[TurnOut(**t) for t in (session.turns or [])],
+        filled_values=session.filled_values or {},
+        derived_values=(session.derived_values or {}).get("values", {}),
+        known_context=session.known_context or {},
+        progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
+        started_at=session.started_at,
+        completed_at=session.completed_at,
+        **extra,
+    )
+
+
+# ── endpoints ─────────────────────────────────────────────────────────────
+
+
+@router.post("", response_model=SessionCreateOut, status_code=status.HTTP_201_CREATED)
+def start_session(
+    request: SessionCreate, db: Session = Depends(get_db)
+) -> SessionCreateOut:
+    """Triage the document and plan the questions. Plan §10 ③ then ④.
+
+    Both stages degrade rather than fail: with Bedrock unreachable every
+    editable region lands in `must_ask` and the planner falls back to its
+    structural grouping, which is a longer interview over the same regions.
+    """
+    template, version = _load(db, request.template_id, request.version_id)
+    schema = detect(_fetch(version), template.format)
+    meta = _template_meta(template)
+
+    context = assemble_context(
+        schema, template_meta=meta, intent=request.intent
+    )
+
+    # The plan is a property of the version, so a cache hit here means the
+    # second session on this document costs no planner call at all.
+    questions = load_question_plan(db, version.id)
+    planner_errors: list[str] = []
+    if not questions:
+        plan = plan_questions(
+            schema,
+            context.must_ask + context.inferable,
+            template_meta=meta,
+            intent=request.intent,
+        )
+        questions = plan.questions
+        planner_errors = plan.errors
+        if questions:
+            save_question_plan(
+                db, version.id, questions, planner_version=plan.planner_version
+            )
+
+    session = GenerationSession(
+        id=uuid.uuid4(),
+        template_id=template.id,
+        base_version_id=version.id,
+        tier=request.tier,
+        user_intent=request.intent,
+        status=STATUS_ACTIVE,
+        known_context=context.as_dict(),
+        filled_values={},
+        derived_values={},
+        turns=[],
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    degraded = bool(context.errors or planner_errors)
+    summary = (
+        f"{len(context.known)} already correct, {len(context.inferable)} derivable, "
+        f"{len(questions)} question{'s' if len(questions) != 1 else ''} to ask"
+        + (" (planned without the model)" if degraded else "")
+    )
+    logger.info("session %s started on %s: %s", session.id, template.title, summary)
+
+    return _session_out(
+        session, template, questions, schema, cls=SessionCreateOut, plan_summary=summary
+    )
+
+
+@router.post("/{session_id}/answer", response_model=AnswerOut)
+def answer(
+    session_id: uuid.UUID, request: AnswerIn, db: Session = Depends(get_db)
+) -> AnswerOut:
+    """Extract one answer. Runs the deriver only when it was the last question.
+
+    A skipped question is recorded as a turn with no values, which is the point:
+    the regions it covered stay untouched and *visible* on the review screen,
+    rather than being quietly filled with something plausible.
+    """
+    session = _session(db, session_id)
+    if session.status not in (STATUS_ACTIVE,):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This session is {session.status} and no longer takes answers.",
+        )
+
+    template, version, schema = _context_for(db, session)
+    questions = load_question_plan(db, version.id)
+    current = _current(session, questions)
+    if current is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Every question has been answered."
+        )
+    if request.question_id != current.question_id:
+        # Answering out of order would attribute the values to the wrong region
+        # cluster, so it is refused rather than reordered.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Expected an answer to {current.question_id}, got {request.question_id}.",
+        )
+
+    warnings: list[str] = []
+    if request.skip:
+        extraction_values: dict[str, Any] = {}
+        chips: list[ChipOut] = []
+        degraded = False
+    else:
+        extraction = extract_answer(
+            schema,
+            request.answer,
+            current.covers_regions,
+            question_text=current.question_text,
+        )
+        extraction_values = extraction.values
+        chips = [ChipOut(**c) for c in extraction.chips(_labels(schema))]
+        degraded = not extraction.ok
+        if degraded:
+            warnings.append(
+                "The extractor was unavailable; your answer was kept and can be re-read later."
+            )
+
+    record_turn(
+        session,
+        question_id=current.question_id,
+        question_text=current.question_text,
+        answer=request.answer,
+        extracted=extraction_values,
+        skipped=request.skip,
+        degraded=degraded,
+    )
+
+    next_question = _current(session, questions)
+    derived_out: dict[str, Any] = {}
+
+    if next_question is None:
+        # Last turn. The deriver reasons over the whole document, so it runs
+        # here rather than on every answer -- see the module docstring.
+        context = session.known_context or {}
+        targets = [
+            rid
+            for rid in context.get("inferable", []) + context.get("must_ask", [])
+            if rid not in (session.filled_values or {})
+        ]
+        derivation = derive_values(
+            schema,
+            targets,
+            session.filled_values or {},
+            turns=session.turns,
+            template_meta=_template_meta(template),
+            intent=session.user_intent,
+        )
+        session.derived_values = derivation.as_dict()
+        derived_out = {rid: dv.as_dict() for rid, dv in derivation.values.items()}
+        if not derivation.ok:
+            warnings.append("Derivation was unavailable; only what you typed will be written.")
+        if derivation.unjustified:
+            warnings.append(
+                f"{len(derivation.unjustified)} derived value(s) were discarded for "
+                "naming no source in your answers."
+            )
+
+    db.commit()
+    db.refresh(session)
+
+    return AnswerOut(
+        session_id=session.id,
+        extracted=extraction_values,
+        chips=chips,
+        derived=derived_out,
+        next_question=_question_out(next_question) if next_question else None,
+        progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
+        degraded=degraded,
+        warnings=warnings,
+    )
+
+
+@router.get("/{session_id}", response_model=SessionOut)
+def get_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SessionOut:
+    """Full state, enough to rebuild the chat screen after a reload."""
+    session = _session(db, session_id)
+    template, version, schema = _context_for(db, session)
+    return _session_out(session, template, load_question_plan(db, version.id), schema)
+
+
+def _build_spec(
+    db: Session,
+    session: GenerationSession,
+    schema: Any,
+    *,
+    overrides: dict[str, Any] | None = None,
+):
+    """Stage ⑦ over this session's state. Deterministic; no model call."""
+    question_of_region: dict[str, str] = {}
+    for question in load_question_plan(db, session.base_version_id):
+        for region_id in question.covers_regions:
+            question_of_region[region_id] = question.question_id
+
+    filled = dict(session.filled_values or {})
+    if overrides:
+        # The review screen's edits are the user's own words and outrank both
+        # the extractor and the deriver.
+        filled.update(overrides)
+
+    return plan_change_spec(
+        schema,
+        filled,
+        (session.derived_values or {}).get("values", {}),
+        base_version_id=session.base_version_id,
+        tier=session.tier,
+        intent=session.user_intent,
+        question_of_region=question_of_region,
+    )
+
+
+@router.get("/{session_id}/spec", response_model=SpecOut)
+def get_spec(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SpecOut:
+    """The Change Specification this session would compile.
+
+    Built on demand rather than stored: it is a pure function of the session's
+    values, so a stored copy could only ever go stale against an edited answer.
+    The stored copy is written by `compile_and_store`, at the moment it is
+    actually applied to bytes -- which is the version worth auditing.
+    """
+    session = _session(db, session_id)
+    _, _, schema = _context_for(db, session)
+    planned = _build_spec(db, session, schema)
+    return SpecOut(
+        session_id=session.id,
+        base_version_id=session.base_version_id,
+        spec=planned.spec,
+        operation_count=planned.operation_count,
+        provenance_counts=planned.spec.provenance_counts(),
+        skipped=planned.skipped,
+    )
+
+
+@router.patch("/{session_id}/spec/{op_index}", response_model=SpecOut)
+def patch_spec_operation(
+    session_id: uuid.UUID,
+    op_index: int,
+    request: SpecOperationPatch,
+    db: Session = Depends(get_db),
+) -> SpecOut:
+    """Edit one operation's value from the review screen.
+
+    The edit is stored against the **region**, not the operation index, and the
+    spec is rebuilt from it. Storing it positionally would break the moment any
+    other answer changed and renumbered the operations.
+
+    Only the value moves. Re-pointing an operation at a different region is not
+    offered here -- that is precisely what the injection barrier exists to stop,
+    and a review screen is not a reason to open a second door to it.
+    """
+    session = _session(db, session_id)
+    _, _, schema = _context_for(db, session)
+    planned = _build_spec(db, session, schema)
+
+    operations = planned.spec.operations
+    if op_index < 0 or op_index >= len(operations):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"This spec has {len(operations)} operations; there is no #{op_index}.",
+        )
+    target = operations[op_index].target.region_id
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="That operation does not name a region and cannot be edited.",
+        )
+
+    value = request.rows if request.rows is not None else request.value
+    if value is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide a `value` or `rows`.",
+        )
+
+    filled = dict(session.filled_values or {})
+    filled[target] = value
+    session.filled_values = filled
+    db.commit()
+    db.refresh(session)
+
+    rebuilt = _build_spec(db, session, schema)
+    return SpecOut(
+        session_id=session.id,
+        base_version_id=session.base_version_id,
+        spec=rebuilt.spec,
+        operation_count=rebuilt.operation_count,
+        provenance_counts=rebuilt.spec.provenance_counts(),
+        skipped=rebuilt.skipped,
+    )
+
+
+@router.post("/{session_id}/compile", response_model=CompileResponse)
+def compile_session(
+    session_id: uuid.UUID,
+    request: SessionCompileIn,
+    db: Session = Depends(get_db),
+) -> CompileResponse:
+    """Compile this session's spec. `dry_run` returns QA and keeps nothing.
+
+    A thin wrapper over `compile_and_store` by design: the bytes path shipped
+    and was tested before the conversation existed, and a second implementation
+    would eventually disagree with it about whether QA is a gate.
+    """
+    session = _session(db, session_id)
+    template, version, schema = _context_for(db, session)
+    planned = _build_spec(db, session, schema, overrides=request.overrides)
+
+    if not planned.spec.operations:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This session has produced no operation to apply yet.",
+        )
+
+    response = compile_and_store(
+        db,
+        template,
+        version,
+        planned.spec,
+        dry_run=request.dry_run,
+        publish=request.publish,
+        session_id=session.id,
+    )
+
+    if response.overall == "pass":
+        session.status = STATUS_COMMITTED if not request.dry_run else STATUS_COMPILED
+        if not request.dry_run:
+            session.completed_at = datetime.now(timezone.utc)
+        db.commit()
+
+    return response
+
+
+@router.post("/{session_id}/commit", response_model=CompileResponse)
+def commit_session(
+    session_id: uuid.UUID,
+    request: SessionCompileIn,
+    db: Session = Depends(get_db),
+) -> CompileResponse:
+    """Compile for real and keep the result as a new version.
+
+    Identical to `/compile` with `dry_run: false`, exposed separately because
+    plan §6 names both and because "commit" reading as a commit at the call site
+    is worth one route.
+    """
+    return compile_session(
+        session_id,
+        SessionCompileIn(
+            dry_run=False, publish=request.publish, overrides=request.overrides
+        ),
+        db,
+    )
+
+
+@router.post("/{session_id}/abandon", response_model=SessionOut)
+def abandon_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SessionOut:
+    """Walk away. The session is kept, not deleted -- an abandoned interview is
+    evidence about the question plan, and deleting it would throw that away."""
+    session = _session(db, session_id)
+    session.status = STATUS_ABANDONED
+    session.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(session)
+
+    template, version, schema = _context_for(db, session)
+    return _session_out(session, template, load_question_plan(db, version.id), schema)
