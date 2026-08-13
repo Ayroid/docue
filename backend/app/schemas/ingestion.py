@@ -23,6 +23,35 @@ class IngestionAccepted(BaseModel):
     status: str = Field(description="Always 'ingesting' -- the job has been queued.")
 
 
+class EnrichmentOut(BaseModel):
+    """What the AI half of ingestion produced, for the same poll.
+
+    Separate from the structural fields above because it can legitimately be
+    `null` on a succeeded job: enrichment runs after the structural result is
+    committed and is not allowed to fail it, so a Bedrock outage leaves a
+    perfectly good template that simply is not searchable by meaning yet. A
+    frontend should render this section as pending rather than as an error.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    model_id: str
+    classifier_prompt: str
+    metadata_prompt: str
+    regions_labelled: int
+    regions_write_refused: int = Field(
+        description="Regions the model judged should not be written by a generation agent."
+    )
+    metadata_generated: bool = Field(
+        description="False when the model call failed and the filename was used instead."
+    )
+    embedded: bool = Field(description="Whether the template is findable by semantic search.")
+    title: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    elapsed_ms: int | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class JobStatusOut(BaseModel):
     """What `GET /templates/{id}/ingestion/{job_id}` returns, for polling.
 
@@ -37,7 +66,8 @@ class JobStatusOut(BaseModel):
     kind: str
     status: str = Field(description="queued | running | succeeded | failed")
     stage: str | None = Field(
-        default=None, description="fingerprint | detect | harvest | verify | persist"
+        default=None,
+        description="fingerprint | detect | harvest | verify | persist | enrich | done",
     )
     progress: int = Field(ge=0, le=100)
     error: str | None = None
@@ -59,6 +89,11 @@ class JobStatusOut(BaseModel):
         default=None, description="The `Ver.` the document claims about itself."
     )
     region_ids_stable: bool | None = None
+    enrichment: EnrichmentOut | None = Field(
+        default=None,
+        description="Semantic labels, discovery metadata and the embedding. Null while "
+        "pending, and also when the model call failed -- the template is still usable.",
+    )
     warnings: list[str] = Field(default_factory=list)
     elapsed_ms: int | None = None
 

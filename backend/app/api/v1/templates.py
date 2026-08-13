@@ -256,6 +256,7 @@ def ingestion_status(
         form_id=summary.get("form_id"),
         in_doc_version=summary.get("in_doc_version"),
         region_ids_stable=summary.get("region_ids_stable"),
+        enrichment=summary.get("enrichment"),
         warnings=summary.get("warnings", []),
         elapsed_ms=summary.get("elapsed_ms"),
         created_at=job.created_at,
