@@ -1,8 +1,8 @@
 """Structural QA: compare fingerprints before/after a compile. No AI, no rendering."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from app.ingestion.fingerprint import Fingerprint
+from app.ingestion.fingerprint import Fingerprint, PptxFingerprint
 
 
 class StructuralQAError(RuntimeError):
@@ -66,4 +66,77 @@ def diff_fingerprints(
             f"sheets {before.sheets}->{after.sheets}"
         )
 
+    return result
+
+
+@dataclass
+class PptxStructuralQAResult:
+    passed: bool
+    lost_parts: list[str]
+    text_runs_before: int
+    text_runs_after: int
+    table_rows_before: int
+    table_rows_after: int
+    violations: list[str] = field(default_factory=list)
+
+
+def diff_pptx_fingerprints(
+    before: PptxFingerprint,
+    after: PptxFingerprint,
+    *,
+    expected_row_delta: int = 0,
+) -> PptxStructuralQAResult:
+    """Compare deck fingerprints, distinguishing invariants from content.
+
+    Slides, layouts, masters, notes slides, shapes, pictures, charts, embedded
+    workbooks, media and the sensitivity label are invariants: this compiler
+    writes text, never structure, so any change is a bug. Text runs and table
+    cells are *content* and move whenever a bullet list or table is rewritten,
+    so they are reported rather than enforced -- functional QA is what proves
+    the text itself is right.
+
+    `expected_row_delta` is the exception: cloning table rows changes the row
+    count on purpose, so the compiler states how many it added and anything
+    else fails.
+    """
+    violations: list[str] = []
+    lost_parts = sorted(set(before.package_parts) - set(after.package_parts))
+    if lost_parts:
+        violations.append(f"parts lost: {lost_parts}")
+
+    for name in (
+        "slides",
+        "slide_layouts",
+        "slide_masters",
+        "notes_slides",
+        "shapes",
+        "pictures",
+        "charts",
+        "embedded_workbooks",
+        "media_files",
+        "tables",
+        "sensitivity_label",
+    ):
+        was, now = getattr(before, name), getattr(after, name)
+        if was != now:
+            violations.append(f"{name} {was}->{now}")
+
+    row_delta = after.table_rows - before.table_rows
+    if row_delta != expected_row_delta:
+        violations.append(
+            f"table_rows {before.table_rows}->{after.table_rows} "
+            f"(delta {row_delta}, expected {expected_row_delta})"
+        )
+
+    result = PptxStructuralQAResult(
+        passed=not violations,
+        lost_parts=lost_parts,
+        text_runs_before=before.text_runs,
+        text_runs_after=after.text_runs,
+        table_rows_before=before.table_rows,
+        table_rows_after=after.table_rows,
+        violations=violations,
+    )
+    if violations:
+        raise StructuralQAError("Structural QA failed: " + "; ".join(violations))
     return result
