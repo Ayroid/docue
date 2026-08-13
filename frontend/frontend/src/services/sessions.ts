@@ -161,10 +161,18 @@ export interface CompileResponse {
   created_at: string | null
 }
 
+/* FastAPI's body for a route that does not exist. It carries no information
+   about *what* was not found, so treating it as a detail puts the bare words
+   "Not Found" in front of a user — which is what happened the first time the
+   backend was running a process older than these endpoints. Recognised here so
+   the message can say something actionable instead. */
+const FRAMEWORK_404 = 'Not Found'
+
 async function detailOf(res: Response): Promise<string | null> {
   try {
     const body = await res.json()
-    return typeof body?.detail === 'string' ? body.detail : null
+    if (typeof body?.detail !== 'string') return null
+    return body.detail === FRAMEWORK_404 ? null : body.detail
   } catch {
     return null
   }
@@ -180,8 +188,14 @@ async function call<T>(path: string, init?: RequestInit, notFound?: string): Pro
 
   if (!res.ok) {
     const detail = await detailOf(res)
+    if (detail) throw new TemplateApiError(res.status, detail)
+
+    // No usable detail. A 404 on a route the server does not publish almost
+    // always means the API is running older code than this build expects.
     const message =
-      res.status === 404 && notFound ? (detail ?? notFound) : (detail ?? `Request failed (${res.status}).`)
+      res.status === 404
+        ? `${notFound ?? 'Not found.'} If this persists, the backend may be running an older build — restart it and try again.`
+        : `Request failed (${res.status}).`
     throw new TemplateApiError(res.status, message)
   }
 
