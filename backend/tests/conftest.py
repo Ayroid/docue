@@ -15,6 +15,11 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
+# The suite wrappers run scripts as subprocesses, so they never needed `app`
+# importable here. Tests that check a contract in-process do.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 # Every script computes this same path for itself (see
 # `scripts/test_region_detection.py`): the corpus lives outside the repo
 # because the sample documents are YMSLI's, not ours to commit.

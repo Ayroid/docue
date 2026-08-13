@@ -35,6 +35,7 @@ class EnrichmentOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    enrichment_version: str
     model_id: str
     classifier_prompt: str
     metadata_prompt: str
@@ -77,6 +78,10 @@ class JobStatusOut(BaseModel):
         default=None,
         description="Package fingerprint of the ingested bytes, `package_parts` included.",
     )
+    pipeline_version: str | None = None
+    detector_version: str | None = Field(
+        default=None, description="Which detector produced this schema, for drift and re-ingest."
+    )
     regions_detected: int | None = None
     regions_writable: int | None = None
     counts_by_kind: dict[str, int] | None = None
@@ -87,6 +92,9 @@ class JobStatusOut(BaseModel):
     form_id: str | None = None
     in_doc_version: str | None = Field(
         default=None, description="The `Ver.` the document claims about itself."
+    )
+    harvest_source: dict[str, Any] | str | None = Field(
+        default=None, description="Where each harvested value was read from, for provenance."
     )
     region_ids_stable: bool | None = None
     enrichment: EnrichmentOut | None = Field(
