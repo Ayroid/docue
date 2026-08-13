@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TemplateVersionOut(BaseModel):
@@ -39,6 +39,20 @@ class TemplateOut(BaseModel):
     # form ("YMSLI-F-MOM"); `house_pattern` records which house shape it follows.
     form_id: str | None = None
     house_pattern: str | None = None
+
+    # ── generated discovery metadata ──────────────────────────────────────
+    # Written by the enrichment pass, and the only reason a library card can
+    # say what a template is *for* rather than just naming its file. Null until
+    # enrichment finishes -- render as pending, not as missing.
+    purpose: str | None = None
+    when_to_use: str | None = None
+    audience: str | None = None
+    category: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    searchable: bool = Field(
+        default=False,
+        description="True once the template is embedded and findable by semantic search.",
+    )
     current_version_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
