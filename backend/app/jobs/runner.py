@@ -108,9 +108,18 @@ def run_ingestion_job(
             job.stage = "enrich"
             job.progress = 97
             db.commit()
-            enrichment_result = run_enrichment(db, template, version, data)
+            # SAVEPOINT, not a bare try/except. A failed statement poisons the
+            # whole transaction in Postgres, so rolling the *session* back left
+            # it unusable and the final "succeeded" commit failed too -- the job
+            # then sat at `running` forever, which is the precise outcome
+            # "enrichment cannot fail the ingestion" was meant to prevent.
+            # A nested transaction unwinds only the enrichment.
+            with db.begin_nested():
+                enrichment_result = run_enrichment(db, template, version, data)
+            db.commit()
         except Exception as exc:  # noqa: BLE001 - never fails the ingestion
             logger.warning("enrichment failed for version %s: %s", version_id, exc)
+            enrichment_result = None
             db.rollback()
 
         job.status = STATUS_SUCCEEDED

@@ -124,3 +124,28 @@ def test_template_output_exposes_the_generated_metadata() -> None:
 
     for field in ("purpose", "when_to_use", "audience", "category", "tags", "searchable"):
         assert field in TemplateOut.model_fields, f"TemplateOut drops {field}"
+
+
+def test_semantic_role_is_clamped_to_the_column_width() -> None:
+    """An over-long role is not cosmetic — it kills the whole enrichment.
+
+    `document_regions.semantic_role` is VARCHAR(100). A model that answers with
+    a sentence overflows it, Postgres fails the statement, and a failed
+    statement poisons the transaction: the observed result was an ingestion job
+    stuck at `running` forever. Caught in production on the BFL, whose role came
+    back at 106 characters.
+    """
+    from app.ingestion.enrich import SEMANTIC_ROLE_MAX, _role
+    from app.models.document_region import DocumentRegion
+
+    column = DocumentRegion.__table__.columns["semantic_role"].type.length
+    assert SEMANTIC_ROLE_MAX <= column, "the clamp is wider than the column it protects"
+
+    real_overflow = (
+        "detailed inventory of business functions with process, IO, ownership, "
+        "frequency, and fit/gap classification"
+    )
+    assert len(real_overflow) > column
+    assert len(_role(real_overflow)) <= column
+    assert _role("meeting date") == "meeting date"
+    assert _role("  padded  ") == "padded"

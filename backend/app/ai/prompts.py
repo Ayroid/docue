@@ -11,7 +11,7 @@ to read in one sitting, and a template that lives beside its schema is harder
 to drift from it.
 """
 
-CLASSIFIER_VERSION = "region-classifier/1.0.0"
+CLASSIFIER_VERSION = "region-classifier/1.1.0"
 METADATA_VERSION = "metadata-writer/1.1.0"
 
 # The taxonomy is the detector's (plan Appendix A). The model is not asked to
