@@ -119,18 +119,23 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: var(--space-2);
     cursor: pointer;
     text-decoration: none;
-    font-family: var(--font-heading);
-    font-weight: var(--font-heading-weight);
+    font-family: var(--font-body);
+    font-weight: 600;
     font-size: 14px;
-    line-height: 1.2;
-    color: var(--color-text);
+    line-height: 20px;
+    color: var(--md-on-surface);
     background: transparent;
     border: 1px solid transparent;
-    padding: var(--space-2) calc(var(--space-3) * 1.2);
-    border-radius: var(--radius-control);
+    padding: 10px var(--space-4);
+    border-radius: var(--radius-md);
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      color 0.15s ease;
   }
   .btn svg {
     display: block;
@@ -139,39 +144,45 @@
     opacity: 0.45;
     cursor: not-allowed;
   }
+  /* The design's primary action is the near-black navy, not the blue — the
+     blue is reserved for links, the active tab and focus. */
   .btn-primary {
-    background: var(--color-accent);
-    color: var(--color-bg);
+    background: var(--md-primary);
+    color: var(--md-on-primary);
   }
   .btn-primary:not(:disabled):hover {
-    background: var(--color-accent-600);
+    background: var(--md-primary-container);
   }
   .btn-primary:not(:disabled):active {
-    background: var(--color-accent-700);
+    background: #0d1b33;
   }
   .btn-secondary {
-    border-color: var(--color-divider);
+    background: var(--md-surface-container-lowest);
+    border-color: var(--md-outline-variant);
+    color: var(--md-on-surface);
   }
   .btn-secondary:not(:disabled):hover {
-    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+    background: var(--md-surface-container);
+    border-color: var(--md-outline);
   }
   .btn-secondary:not(:disabled):active {
-    background: color-mix(in srgb, var(--color-text) 14%, transparent);
+    background: var(--md-surface-container-high);
   }
   .btn-ghost {
-    color: var(--color-accent);
-    padding-inline: var(--space-1);
+    color: var(--md-secondary);
+    padding-inline: var(--space-2);
   }
   .btn-ghost:not(:disabled):hover {
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    background: var(--color-accent-100);
   }
   .btn-ghost:not(:disabled):active {
-    background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    background: var(--color-accent-200);
   }
   .btn-icon {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     padding: 0;
+    border-radius: 9999px;
   }
   .btn-block {
     width: 100%;
@@ -182,31 +193,44 @@
   .field > label {
     display: block;
     font-size: 12px;
-    margin-bottom: 5px;
-    color: color-mix(in srgb, var(--color-text) 70%, transparent);
+    line-height: 16px;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    margin-bottom: var(--space-2);
+    color: var(--md-on-surface-variant);
   }
   .input {
     width: 100%;
-    min-height: 36px;
-    padding: 6px 14px;
+    min-height: 44px;
+    padding: 10px var(--space-4);
     font: inherit;
     font-size: 14px;
-    color: var(--color-text);
-    caret-color: var(--color-accent);
-    background: var(--color-surface);
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-control);
+    line-height: 20px;
+    color: var(--md-on-surface);
+    caret-color: var(--md-secondary);
+    background: var(--md-surface-container-low);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--radius-lg);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .input::placeholder {
+    color: var(--md-on-surface-variant);
+    opacity: 0.75;
   }
   .input:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--color-text) 45%, transparent);
+    border-color: var(--md-outline);
   }
   .input:disabled {
     cursor: not-allowed;
     opacity: 0.55;
-    background: var(--color-bg);
+    background: var(--md-surface-container);
   }
   .input:focus-visible {
-    border-color: var(--color-accent);
+    border-color: var(--md-secondary);
+    box-shadow: 0 0 0 3px rgb(0 88 190 / 0.15);
+    outline: none;
     outline-offset: 0;
   }
   textarea.input {
@@ -217,19 +241,26 @@
   .seg {
     display: inline-flex;
     overflow: hidden;
-    border: 1px solid var(--color-divider);
-    border-radius: var(--radius-control);
+    background: var(--md-surface-container-low);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--radius-lg);
   }
   .seg-opt {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 12px;
-    font-size: 13px;
+    padding: 8px 14px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    color: var(--md-on-surface-variant);
     cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
   }
   .seg-opt + .seg-opt {
-    border-left: 1px solid var(--color-divider);
+    border-left: 1px solid var(--md-outline-variant);
   }
   .seg-opt input {
     position: absolute;
@@ -239,11 +270,12 @@
     pointer-events: none;
   }
   .seg-opt:has(input:checked) {
-    background: var(--color-accent);
-    color: var(--color-bg);
+    background: var(--md-secondary);
+    color: var(--md-on-secondary);
   }
   .seg-opt:not(:has(input:checked)):hover {
-    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface);
   }
   .seg-opt:has(input:focus-visible) {
     outline: 2px solid var(--color-accent);
@@ -298,26 +330,28 @@
   .tag {
     display: inline-flex;
     align-items: center;
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    padding: 3px 10px;
+    gap: 5px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    padding: 4px 10px;
     border-radius: var(--radius-tag);
   }
   .tag-accent {
     background: var(--color-accent-100);
-    color: var(--color-accent-800);
+    color: var(--color-accent-700);
   }
   .tag-accent-2 {
-    background: var(--color-accent-2-100);
-    color: var(--color-accent-2-800);
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
   }
   .tag-neutral {
-    background: var(--color-neutral-100);
-    color: var(--color-neutral-800);
+    background: var(--md-surface-container);
+    color: var(--md-on-surface-variant);
   }
   .tag-outline {
-    border: 1px solid var(--color-accent);
-    color: var(--color-accent);
+    border: 1px solid var(--md-outline-variant);
+    color: var(--md-on-surface-variant);
   }
 
   /* — tables — */
@@ -325,22 +359,32 @@
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
+    line-height: 20px;
   }
   .table th {
     text-align: left;
-    font-size: 11px;
-    letter-spacing: 0.08em;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.05em;
+    font-weight: 500;
     text-transform: uppercase;
-    color: color-mix(in srgb, var(--color-text) 60%, transparent);
-    padding: var(--space-2);
-    border-bottom: 1px solid var(--color-divider);
+    color: var(--md-on-surface-variant);
+    padding: var(--space-3) var(--space-4);
+    background: var(--md-surface-container-low);
+    border-bottom: 1px solid var(--md-outline-variant);
   }
   .table td {
-    padding: var(--space-2);
-    border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--md-surface-container-high);
+  }
+  .table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .table tbody tr {
+    transition: background-color 0.15s ease;
   }
   .table tbody tr:hover {
-    background: color-mix(in srgb, var(--color-text) 4%, transparent);
+    background: var(--md-surface-container-low);
   }
 
   /* — dialog — */
@@ -381,43 +425,102 @@
 
   /* ── Hub-specific classes, lifted from the prototype's <style> block ────── */
 
+  /* Horizontal tab in the header bar: the active one is marked by a blue
+     underline and weight, not a filled pill. */
   .hub-nav {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 11px;
-    padding: 9px 13px;
-    border-radius: 9px;
-    border: 1px solid transparent;
+    gap: var(--space-2);
+    height: 48px;
+    padding: 0 var(--space-1);
+    border: 0;
+    border-bottom: 2px solid transparent;
     background: transparent;
     cursor: pointer;
     font: inherit;
     font-size: 14px;
-    color: var(--color-text);
-    text-align: left;
-    width: 100%;
+    line-height: 20px;
+    white-space: nowrap;
+    color: var(--md-on-surface-variant);
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
   }
   .hub-nav:hover {
-    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+    color: var(--md-on-surface);
   }
   .hub-nav[aria-current='page'] {
-    background: var(--color-accent);
-    color: var(--color-bg);
+    color: var(--md-secondary);
+    border-bottom-color: var(--md-secondary);
+    font-weight: 700;
+  }
+
+  /* Sidebar variant, kept for the collapsed/mobile drawer. */
+  .hub-nav-stacked {
+    width: 100%;
+    height: auto;
+    padding: 10px var(--space-3);
+    border-bottom: 0;
+    border-radius: var(--radius-md);
+    text-align: left;
+  }
+  .hub-nav-stacked:hover {
+    background: var(--md-surface-container);
+  }
+  .hub-nav-stacked[aria-current='page'] {
+    background: var(--color-accent-100);
+    border-bottom: 0;
   }
 
   .hub-tcard {
     display: flex;
     flex-direction: column;
-    gap: 11px;
-    padding: 18px;
-    border-radius: 14px;
-    background: var(--color-surface);
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--md-surface-container-lowest);
+    border: 1px solid var(--md-outline-variant);
+    box-shadow: var(--shadow-sm);
     transition:
-      box-shadow 0.15s ease,
-      transform 0.15s ease;
+      box-shadow 0.2s ease,
+      border-color 0.2s ease;
   }
   .hub-tcard:hover {
     box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
+    border-color: var(--md-outline);
+  }
+
+  /* Status pills — Stitch shows Approved green, Draft/neutral grey, failed
+     red, each with a leading dot. */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    white-space: nowrap;
+  }
+  .pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: currentColor;
+  }
+  .pill-ok {
+    background: #e3f7ee;
+    color: #056d47;
+  }
+  .pill-warn {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
+  }
+  .pill-bad {
+    background: var(--md-error-container);
+    color: var(--md-on-error-container);
   }
 
   .hub-chip {

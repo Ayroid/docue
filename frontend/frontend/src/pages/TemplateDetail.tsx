@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/common'
+import { Icon } from '@/components/ui/icon'
 import { DownloadIcon } from '@/components/icons'
 
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
@@ -98,21 +99,56 @@ export function TemplateDetail() {
 
   return (
     <PageBody>
-      <div className="flex items-start gap-4 flex-wrap mb-[22px]">
-        <div className="min-w-0">
-          <Button
-            variant="ghost"
-            className="py-1 px-2 mb-[6px] whitespace-nowrap"
-            onClick={() => navigate('/discovery')}
-          >
-            Back to Discovery
-          </Button>
-          <h2 className="text-[clamp(24px,2.6vw,32px)] mb-1">{doc.title}</h2>
-          <p className="opacity-65 text-[14px] m-0">
-            {doc.format.toUpperCase()} · v{version?.version_number ?? 1} · uploaded{' '}
-            {new Date(version?.created_at ?? doc.created_at).toLocaleDateString()}
-          </p>
+      <nav className="flex items-center gap-2 text-label-md text-neutral-600">
+        <button type="button" className="bg-transparent border-0 p-0 cursor-pointer font-[inherit] text-label-md hover:text-accent" onClick={() => navigate('/discovery')}>
+          Templates
+        </button>
+        <Icon name="chevron_right" size={14} />
+        <span className="uppercase">{doc.format}</span>
+        <Icon name="chevron_right" size={14} />
+        <span className="text-ink truncate max-w-[40ch]">{doc.title}</span>
+      </nav>
+
+      <div className="flex items-start gap-4 flex-wrap">
+        <FormatChip size={40}>{CHIP_BY_FORMAT[doc.format]}</FormatChip>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-headline-lg text-ink m-0 mb-1 truncate">{doc.title}</h1>
+          <p className="text-body-md text-neutral-700 m-0 truncate">{doc.original_filename}</p>
         </div>
+        <div className="flex gap-2 flex-none">
+          <Button variant="secondary" onClick={handleDownload}>
+            <DownloadIcon width={16} height={16} />
+            Download
+          </Button>
+          <Button asChild variant="primary">
+            <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
+              <Icon name="open_in_new" size={16} />
+              Open full page
+            </a>
+          </Button>
+        </div>
+      </div>
+
+      {/* Metadata strip — one cell per fact the server actually records. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { icon: 'verified', label: 'Status', value: doc.status },
+          { icon: 'history', label: 'Current version', value: `v${version?.version_number ?? 1}` },
+          { icon: 'database', label: 'Size', value: version ? formatBytes(version.size_bytes) : 'unknown' },
+          {
+            icon: 'calendar_today',
+            label: 'Last updated',
+            value: new Date(version?.created_at ?? doc.created_at).toLocaleDateString(),
+          },
+        ].map((m) => (
+          <div key={m.label} className="bg-surface border border-divider rounded-card p-4">
+            <div className="text-label-md uppercase text-neutral-600 mb-2">{m.label}</div>
+            <div className="flex items-center gap-2 text-body-lg font-semibold text-ink">
+              <Icon name={m.icon} size={18} className="text-accent" />
+              <span className="truncate capitalize">{m.value}</span>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
@@ -132,47 +168,22 @@ export function TemplateDetail() {
         </Panel>
 
         <div className="flex flex-col gap-4 min-w-0">
-          <Panel>
-            <SectionLabel>File</SectionLabel>
-            <div className="flex items-center gap-[10px] mb-3">
-              <FormatChip size={38}>{CHIP_BY_FORMAT[doc.format]}</FormatChip>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13.5px] font-semibold truncate">{doc.original_filename}</div>
-                <div className="text-[11.5px] opacity-55">
-                  {version ? formatBytes(version.size_bytes) : 'size unknown'}
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-col gap-[10px] text-[12.5px]">
+          <div className="bg-surface border border-divider rounded-card p-5">
+            <SectionLabel>File details</SectionLabel>
+            <div className="flex flex-col gap-3 text-body-md">
               {[
                 ['Format', doc.format.toUpperCase()],
                 ['Version', `v${version?.version_number ?? 1}`],
                 ['Status', doc.status],
+                ['Size', version ? formatBytes(version.size_bytes) : '—'],
                 ['Uploaded', new Date(version?.created_at ?? doc.created_at).toLocaleString()],
               ].map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-3 border-t border-divider pt-[10px]">
-                  <span className="opacity-60">{label}</span>
+                <div key={label} className="flex justify-between gap-3 border-t border-divider pt-3 first:border-0 first:pt-0">
+                  <span className="text-neutral-700">{label}</span>
                   <span className="font-semibold text-right break-all">{value}</span>
                 </div>
               ))}
             </div>
-          </Panel>
-
-          <div className="flex flex-col gap-[10px]">
-            <Button asChild variant="primary" block className="mt-0 whitespace-nowrap">
-              <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
-                Open in full page
-              </a>
-            </Button>
-            <Button
-              variant="secondary"
-              block
-              className="mt-0 gap-[7px] whitespace-nowrap"
-              onClick={handleDownload}
-            >
-              <DownloadIcon width={14} height={14} />
-              Download
-            </Button>
           </div>
         </div>
       </div>

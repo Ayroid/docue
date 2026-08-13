@@ -185,7 +185,7 @@ export function DocumentLibrary() {
                     onClick={() => navigate(`/templates/${selected.id}/generate`)}
                   >
                     <GenerateIcon width={14} height={14} />
-                    Generate
+                    Use template
                   </Button>
                   <Button
                     variant="secondary"
