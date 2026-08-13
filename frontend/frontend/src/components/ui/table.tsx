@@ -13,7 +13,11 @@ export function TableCard({
 }) {
   return (
     <div
-      className={cn('bg-surface rounded-card pt-2 px-[18px] pb-[14px]', scroll && 'overflow-x-auto', className)}
+      className={cn(
+        'bg-surface border border-divider rounded-card overflow-hidden shadow-elev-sm',
+        scroll && 'overflow-x-auto',
+        className,
+      )}
     >
       {children}
     </div>
@@ -35,5 +39,5 @@ export function SectionLabel({ className, ...props }: HTMLAttributes<HTMLDivElem
 
 /** The `background:var(--color-surface)` panel used for every sidebar card. */
 export function Panel({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('bg-surface rounded-card p-[18px]', className)} {...props} />
+  return <div className={cn('bg-surface border border-divider rounded-card p-5 shadow-elev-sm', className)} {...props} />
 }

@@ -81,13 +81,25 @@ export default {
         'elev-md': 'var(--shadow-md)',
         'elev-lg': 'var(--shadow-lg)',
       },
+      /* Stitch's type scale, names kept as published so the design and the
+         code refer to a heading the same way. */
       fontSize: {
-        h1: ['42px', { lineHeight: '1.12', letterSpacing: '-0.015em' }],
-        h2: ['32px', { lineHeight: '1.12', letterSpacing: '-0.015em' }],
-        h3: ['25px', { lineHeight: '1.12', letterSpacing: '-0.015em' }],
-        h4: ['20px', { lineHeight: '1.12', letterSpacing: '-0.015em' }],
-        h5: ['16px', { lineHeight: '1.12', letterSpacing: '-0.015em' }],
-        h6: ['13px', { lineHeight: '1.12', letterSpacing: '0.08em' }],
+        'display-lg': ['48px', { lineHeight: '60px', letterSpacing: '-0.02em', fontWeight: '700' }],
+        'headline-lg': ['32px', { lineHeight: '40px', letterSpacing: '-0.01em', fontWeight: '600' }],
+        'headline-md': ['24px', { lineHeight: '32px', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '28px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.05em', fontWeight: '500' }],
+        h1: ['48px', { lineHeight: '60px', letterSpacing: '-0.02em' }],
+        h2: ['32px', { lineHeight: '40px', letterSpacing: '-0.01em' }],
+        h3: ['24px', { lineHeight: '32px' }],
+        h4: ['18px', { lineHeight: '28px' }],
+        h5: ['16px', { lineHeight: '24px' }],
+        h6: ['12px', { lineHeight: '16px', letterSpacing: '0.05em' }],
+      },
+      maxWidth: {
+        container: 'var(--container-max)',
       },
       keyframes: {
         hubfade: {

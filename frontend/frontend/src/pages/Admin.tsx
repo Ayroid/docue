@@ -5,9 +5,9 @@ import { useHub } from '@/store/HubProvider'
 import { getTemplate, TemplateApiError, type TemplateOut } from '@/services/templates'
 import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Table, TableCard } from '@/components/ui/table'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
+import { Icon } from '@/components/ui/icon'
 
 interface VerifyState {
   rowId: number
@@ -29,7 +29,7 @@ interface VerifyState {
  * route, so a reload legitimately empties this list.
  */
 export function Admin() {
-  const { uploads, removeUpload, fireToast } = useHub()
+  const { uploads, approveUpload, removeUpload, fireToast } = useHub()
   const navigate = useNavigate()
   const [verify, setVerify] = useState<VerifyState | null>(null)
 
@@ -52,72 +52,94 @@ export function Admin() {
     <PageBody>
       <PageHeading title="Admin" subtitle="Doc control — templates submitted in this session." />
 
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-title-lg m-0">Manage templates</h2>
+          <p className="text-body-md text-neutral-700 m-0">Administrator view of templates submitted in this session.</p>
+        </div>
+        <Button variant="primary" className="flex-none" onClick={() => navigate('/upload')}>
+          <Icon name="add" size={18} />
+          Upload template
+        </Button>
+      </div>
+
       {uploads.length ? (
-        <TableCard>
-          <Table>
-            <thead>
-              <tr>
-                <th>Submission</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {uploads.map((u) => (
-                <tr key={u.id}>
-                  <td>
-                    <div className="flex items-center gap-[11px] min-w-0">
-                      <FormatChip size={30}>{u.fmt}</FormatChip>
-                      <div className="min-w-0">
-                        <div className="font-semibold truncate">{u.name}</div>
-                        <div className="text-[12px] opacity-55">{u.meta}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span className={statusClass(u.status)}>{u.status}</span>
-                  </td>
-                  <td>
-                    <div className="flex gap-2 justify-end flex-wrap">
-                      {u.backendId ? (
-                        <>
-                          <Button asChild variant="ghost" size="xs" className="whitespace-nowrap">
-                            <a href={`/viewer/${u.backendId}`} target="_blank" rel="noopener noreferrer">
-                              View
-                            </a>
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="xs"
-                            className="whitespace-nowrap"
-                            disabled={verify?.rowId === u.id && verify.loading}
-                            onClick={() => verifyBackend(u.id, u.backendId!)}
-                          >
-                            {verify?.rowId === u.id && verify.loading ? 'Checking…' : 'Verify'}
-                          </Button>
-                        </>
-                      ) : null}
-                      {/* Approval is local bookkeeping: the backend publishes a
-                          template the moment it is uploaded and has no review
-                          state to move it through. */}
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        className="whitespace-nowrap"
-                        onClick={() => {
-                          removeUpload(u.id)
-                          fireToast(`Cleared ${u.name} from the queue`)
-                        }}
-                      >
-                        Clear
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableCard>
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
+          {uploads.map((u) => (
+            <article key={u.id} className="relative bg-surface border border-divider rounded-card p-5 flex flex-col gap-4 shadow-elev-sm">
+              <span className={`${statusClass(u.status)} absolute top-4 right-4 uppercase`}>{u.status}</span>
+
+              <FormatChip size={40}>{u.fmt}</FormatChip>
+
+              <div className="min-w-0">
+                <h3 className="text-title-lg m-0 mb-1 truncate pr-24">{u.name}</h3>
+                <p className="text-body-md text-neutral-700 m-0">{u.meta}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-label-md border-t border-divider pt-4">
+                <div>
+                  <div className="uppercase text-neutral-600 mb-1">Stored</div>
+                  <div className="text-body-md text-ink">{u.backendId ? 'On the server' : 'Not confirmed'}</div>
+                </div>
+                <div>
+                  <div className="uppercase text-neutral-600 mb-1">Note</div>
+                  <div className="text-body-md text-ink truncate">{u.note}</div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 flex-wrap mt-auto pt-1">
+                {u.backendId ? (
+                  <>
+                    <Button asChild variant="secondary" size="sm">
+                      <a href={`/viewer/${u.backendId}`} target="_blank" rel="noopener noreferrer">
+                        <Icon name="visibility" size={16} />
+                        View
+                      </a>
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={verify?.rowId === u.id && verify.loading}
+                      onClick={() => verifyBackend(u.id, u.backendId!)}
+                    >
+                      {verify?.rowId === u.id && verify.loading ? 'Checking…' : 'Verify'}
+                    </Button>
+                  </>
+                ) : null}
+                {u.status === 'Approved' ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => {
+                      removeUpload(u.id)
+                      fireToast(`Cleared ${u.name} from the queue`)
+                    }}
+                  >
+                    Clear
+                  </Button>
+                ) : (
+                  /* Publication is not gated by this: the server stores an
+                     uploaded template as `active` and lists it immediately, so
+                     the file is already in the library. This records the
+                     decision — a real gate needs a review state on the API. */
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => {
+                      approveUpload(u.id)
+                      fireToast(`Approved ${u.name} — live in the library`)
+                    }}
+                  >
+                    <Icon name="check" size={16} />
+                    Approve
+                  </Button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
       ) : (
         <EmptyState
           title="Nothing submitted yet"

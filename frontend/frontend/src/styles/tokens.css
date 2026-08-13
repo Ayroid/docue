@@ -1,106 +1,121 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Design tokens — ported verbatim from
-   `_ds/organic-81e8e890-c05b-4ad8-b993-1727a46b1f81/styles.css`, then retuned
-   into the single Organic palette the app ships (`data-hub-theme='organic'`).
+   Design tokens — the Stitch "TemplateHub Professional" system.
 
-   These are the ONLY hex literals in the app. Everything downstream — Tailwind
-   theme extensions in `tailwind.config.ts` and the component classes in
-   `components.css` — reads them through `var()`.
+   Stitch names its roles the Material-3 way (primary / on-surface /
+   surface-container-*). Those names are kept as the source of truth below,
+   and the app's existing role names are mapped onto them underneath, so
+   `tailwind.config.ts` and `components.css` keep working unchanged while
+   every colour on screen comes from the Stitch palette.
+
+   These are the ONLY hex literals in the app.
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* Organic base */
-  --color-bg: #f5ead8;
-  --color-surface: #ebddc5;
-  --color-text: #201e1d;
-  --color-accent: #c67139;
-  --color-accent-2: #7a8a5e;
-  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+  /* ── Stitch roles, verbatim ─────────────────────────────────────────── */
+  --md-primary: #091426;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #1e293b;
+  --md-on-primary-container: #8590a6;
 
-  /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
-     same step of any role matches the others in visual value. */
-  --color-neutral-100: #f9f4ed;
-  --color-neutral-200: #eee7db;
-  --color-neutral-300: #dcd3c4;
-  --color-neutral-400: #c0b6a5;
-  --color-neutral-500: #a19786;
-  --color-neutral-600: #82796a;
-  --color-neutral-700: #645c50;
-  --color-neutral-800: #474238;
-  --color-neutral-900: #2e2b25;
+  --md-secondary: #0058be;
+  --md-on-secondary: #ffffff;
+  --md-secondary-container: #2170e4;
+  --md-on-secondary-container: #fefcff;
 
-  --color-accent-100: #fff2eb;
-  --color-accent-200: #ffe1d0;
-  --color-accent-300: #ffc6a5;
-  --color-accent-400: #f6a06b;
-  --color-accent-500: #d67f48;
-  --color-accent-600: #b2622d;
-  --color-accent-700: #8c491a;
-  --color-accent-800: #643312;
-  --color-accent-900: #402310;
+  --md-tertiary: #00190e;
+  --md-on-tertiary: #ffffff;
+  --md-tertiary-container: #00301e;
+  --md-on-tertiary-container: #00a472;
 
-  --color-accent-2-100: #f0fae1;
-  --color-accent-2-200: #e1eecc;
-  --color-accent-2-300: #ccdbb2;
-  --color-accent-2-400: #aebf92;
-  --color-accent-2-500: #8fa073;
-  --color-accent-2-600: #728157;
-  --color-accent-2-700: #56633f;
-  --color-accent-2-800: #3d472b;
-  --color-accent-2-900: #272e1b;
+  --md-background: #f7f9fb;
+  --md-surface: #f7f9fb;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f2f4f6;
+  --md-surface-container: #eceef0;
+  --md-surface-container-high: #e6e8ea;
+  --md-surface-container-highest: #e0e3e5;
+  --md-surface-dim: #d8dadc;
 
-  --font-heading: 'Caprasimo', system-ui, sans-serif;
-  --font-heading-weight: 400;
-  --font-body: 'Figtree', system-ui, sans-serif;
+  --md-on-surface: #191c1e;
+  --md-on-surface-variant: #45474c;
+  --md-outline: #75777d;
+  --md-outline-variant: #c5c6cd;
 
-  --space-1: 4.4px;
-  --space-2: 8.8px;
-  --space-3: 13.2px;
-  --space-4: 17.6px;
-  --space-6: 26.4px;
-  --space-8: 35.2px;
+  --md-error: #ba1a1a;
+  --md-on-error: #ffffff;
+  --md-error-container: #ffdad6;
+  --md-on-error-container: #93000a;
 
-  --radius-sm: 8px;
-  --radius-md: 16px;
-  --radius-lg: 28px;
+  --md-inverse-surface: #2d3133;
+  --md-inverse-on-surface: #eff1f3;
 
-  /* Elevation — derived from the ground: soft ink-tinted shadows on a
-     light theme, a hairline edge + ambient darkness on a dark one. */
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
-  --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
-  --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
+  /* ── App roles, mapped onto the above ───────────────────────────────── */
+  --color-bg: var(--md-background);
+  --color-surface: var(--md-surface-container-lowest);
+  --color-text: var(--md-on-surface);
+  --color-accent: var(--md-secondary);
+  --color-accent-2: var(--md-primary);
+  --color-divider: var(--md-outline-variant);
 
-  /* The prototype's retune of the rounded frame: the base Organic system goes
-     fully pill on small controls, the Hub pulls that back to soft rectangles. */
-  --radius-control: 9px;
-  --radius-tag: 6px;
-  --radius-card: 14px;
+  /* Neutral ramp — Stitch's surface ladder extended at both ends so the
+     existing 100..900 call sites keep resolving. */
+  --color-neutral-100: #ffffff;
+  --color-neutral-200: var(--md-surface-container-low);
+  --color-neutral-300: var(--md-surface-container-high);
+  --color-neutral-400: var(--md-outline-variant);
+  --color-neutral-500: var(--md-outline);
+  --color-neutral-600: #5d6067;
+  --color-neutral-700: var(--md-on-surface-variant);
+  --color-neutral-800: #2d3133;
+  --color-neutral-900: var(--md-on-surface);
+
+  /* Accent ramp — tints and shades of Stitch's blue. */
+  --color-accent-100: #e8f0fd;
+  --color-accent-200: #cfe0fb;
+  --color-accent-300: #a6c5f6;
+  --color-accent-400: #6ea2ef;
+  --color-accent-500: #2170e4;
+  --color-accent-600: var(--md-secondary);
+  --color-accent-700: #00479a;
+  --color-accent-800: #003471;
+  --color-accent-900: #00224a;
+
+  /* Second accent ramp — the navy, used for chips and quieter emphasis. */
+  --color-accent-2-100: #eceef2;
+  --color-accent-2-200: #d5dae3;
+  --color-accent-2-300: #b3bccb;
+  --color-accent-2-400: #8590a6;
+  --color-accent-2-500: #5b6880;
+  --color-accent-2-600: #3c475a;
+  --color-accent-2-700: #263145;
+  --color-accent-2-800: var(--md-primary-container);
+  --color-accent-2-900: var(--md-primary);
+
+  /* ── Type — Stitch is Inter throughout, headings included ───────────── */
+  --font-heading: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading-weight: 600;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* ── Spacing — Stitch's 4/8/16/24/32 scale ──────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --container-max: 1280px;
+
+  /* ── Radius — Stitch: 4 / 8 / 12 / full ─────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-control: 8px;
+  --radius-tag: 9999px;
+  --radius-card: 12px;
+
+  /* ── Elevation — Stitch leans on soft, tight shadows ────────────────── */
+  --shadow-sm: 0 1px 2px 0 rgb(9 20 38 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(9 20 38 / 0.08), 0 2px 4px -2px rgb(9 20 38 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(9 20 38 / 0.1), 0 4px 6px -4px rgb(9 20 38 / 0.05);
 }
-
-/* Subtle retune of the Organic tokens: the sage voice leads, the terracotta
-   ramp is muted to a soft clay so it reads as warmth, not orange. */
-[data-hub-theme='organic'] {
-  --color-bg: #faf6ef;
-  --color-surface: #f0eae0;
-  --color-accent: #7d8a6b;
-  --color-accent-2: #a9826a;
-  --color-accent-100: #f2f4ec;
-  --color-accent-200: #e4e8da;
-  --color-accent-300: #cdd4bf;
-  --color-accent-400: #adb79b;
-  --color-accent-500: #8e9a7c;
-  --color-accent-600: #6e7a5f;
-  --color-accent-700: #535d47;
-  --color-accent-800: #3b4332;
-  --color-accent-900: #272d21;
-  --color-accent-2-100: #f8f1eb;
-  --color-accent-2-200: #eee0d4;
-  --color-accent-2-300: #ddc8b6;
-  --color-accent-2-400: #c6a892;
-  --color-accent-2-500: #ab8a72;
-  --color-accent-2-600: #8d6e59;
-  --color-accent-2-700: #6d5342;
-  --color-accent-2-800: #4e3a2e;
-  --color-accent-2-900: #33261e;
-}
-

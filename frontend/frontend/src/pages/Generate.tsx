@@ -25,7 +25,7 @@ export function Generate() {
   const [params] = useSearchParams()
   const { startSession, updateSession, sessions, saveDraft } = useHub()
 
-  /* Starts from the real document the Generate button came from — its title,
+  /* Starts from the real document the Use-template button came from — its title,
      format and version are genuine even though the walkthrough itself is
      scripted. */
   const template = useDemoTemplate(id)
@@ -111,15 +111,15 @@ export function Generate() {
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-5 items-stretch">
         {/* ── Conversation ─────────────────────────────────────────────── */}
-        <div className="bg-surface rounded-card flex flex-col min-h-[520px] overflow-hidden">
-          <div className="flex items-center gap-[11px] py-[14px] px-[18px] border-b border-divider">
-            <div className="w-8 h-8 flex-none rounded-pill bg-accent text-bg grid place-items-center">
+        <div className="bg-surface border border-divider rounded-card flex flex-col min-h-[520px] overflow-hidden shadow-elev-sm">
+          <div className="flex items-center gap-3 py-4 px-5 border-b border-divider">
+            <div className="w-8 h-8 flex-none rounded-md bg-accent-100 text-accent grid place-items-center">
               <SparkleIcon width={16} height={16} />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-[14px]">Auto-fill agent</div>
-              <div className="text-[11.5px] opacity-55">
-                {done ? 'All questions answered' : `Question ${qIndex + 1} of ${AGENT_QS.length}`}
+              <div className="text-label-md uppercase text-accent">AI assistant</div>
+              <div className="text-title-lg text-ink">
+                {done ? 'All questions answered' : `Step ${qIndex + 1} of ${AGENT_QS.length}`}
               </div>
             </div>
             <div className="flex flex-col items-end gap-[5px]">
@@ -133,13 +133,22 @@ export function Generate() {
             </div>
           </div>
 
-          <div className="flex-1 p-[18px] flex flex-col gap-3 overflow-y-auto">
+          <div className="px-5 pt-4">
+            <div className="h-1.5 w-full rounded-pill bg-neutral-200 overflow-hidden">
+              <div
+                className="h-full rounded-pill bg-accent2-900 transition-all duration-300"
+                style={{ width: `${Math.round((Math.min(qIndex, AGENT_QS.length) / AGENT_QS.length) * 100)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 p-5 flex flex-col gap-4 overflow-y-auto">
             {messages.map((m, i) => (
               <div key={i} className="flex flex-col gap-[7px]">
                 <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`max-w-[82%] py-[11px] px-[14px] rounded-[12px] text-[14px] leading-[1.5] ${
-                      m.role === 'user' ? 'bg-accent text-bg' : 'bg-accent-100 text-accent-900'
+                    className={`max-w-[82%] py-3 px-4 rounded-lg text-body-md ${
+                      m.role === 'user' ? 'bg-accent2-900 text-white' : 'bg-neutral-200 text-ink'
                     }`}
                   >
                     {m.text}
@@ -158,7 +167,7 @@ export function Generate() {
             ))}
           </div>
 
-          <div className="py-[14px] px-[18px] border-t border-divider flex gap-[10px] items-center">
+          <div className="py-4 px-5 border-t border-divider flex gap-3 items-center">
             <Textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}

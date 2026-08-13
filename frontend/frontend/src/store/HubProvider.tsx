@@ -78,6 +78,7 @@ interface HubState {
   lastUpload: { name: string; fmt: Fmt; meta: string } | null
   addUpload: (name: string, fmt: Fmt, meta: string, backendId?: string) => void
   removeUpload: (id: number) => void
+  approveUpload: (id: number) => void
 
   /** Walkthrough state — see the note above `Draft`. */
   documents: DemoDoc[]
@@ -139,6 +140,18 @@ export function HubProvider({ children }: { children: ReactNode }) {
 
   const removeUpload = useCallback((id: number) => {
     setUploads((prev) => prev.filter((u) => u.id !== id))
+  }, [])
+
+  /* Marks the submission approved in this session's queue. Publication itself
+     is not gated by this: the server stores a template as `active` the moment
+     it is uploaded and `GET /templates` returns it, so the file is already in
+     the library. Gating would need a review state on the API. */
+  const approveUpload = useCallback((id: number) => {
+    setUploads((prev) =>
+      prev.map((u) =>
+        u.id === id ? { ...u, status: 'Approved', kind: 'Approved', note: 'Published to the library' } : u,
+      ),
+    )
   }, [])
 
   /* ── Generation walkthrough ─────────────────────────────────────────── */
@@ -220,6 +233,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
       lastUpload,
       addUpload,
       removeUpload,
+      approveUpload,
       documents,
       drafts,
       sessions,
@@ -241,6 +255,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
       lastUpload,
       addUpload,
       removeUpload,
+      approveUpload,
       documents,
       drafts,
       sessions,
