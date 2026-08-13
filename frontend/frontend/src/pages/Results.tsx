@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
+import { useSemanticSearch } from '@/features/search/useSemanticSearch'
+import { SearchResultCard } from '@/features/search/SearchResultCard'
 import { filterTemplates } from '@/services/search'
 import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -26,8 +28,27 @@ export function Results() {
   const [format, setFormat] = useState('all')
   const [draftQuery, setDraftQuery] = useState(query)
 
-  const { templates, loading, error } = useRealTemplates()
-  const results = useMemo(() => filterTemplates(templates, query, format), [templates, query, format])
+  const { templates, loading: listing, error: listError } = useRealTemplates()
+  /* A query goes to the backend, which fuses keyword and vector ranking; an
+     empty one browses the library. `POST /search` answers a blank query with
+     nothing, and this page doubles as the browse view. */
+  const search = useSemanticSearch(query)
+
+  /* Format filtering is applied after ranking rather than pushed into the
+     query, because the backend does not filter by format -- so this narrows
+     the ranked list instead of pretending to have ranked a narrower one. */
+  const hits = useMemo(
+    () => (search.response?.results ?? []).filter((r) => format === 'all' || r.format === format),
+    [search.response, format],
+  )
+  const browse = useMemo(
+    () => (query ? [] : filterTemplates(templates, '', format)),
+    [templates, query, format],
+  )
+
+  const loading = query ? search.loading : listing
+  const error = query ? search.error : listError
+  const count = query ? hits.length : browse.length
 
   const applied = [
     { label: `Search: ${query || 'everything'}`, clear: () => setParams({ q: '' }) },
@@ -92,7 +113,10 @@ export function Results() {
               <p className="opacity-65 text-[13px] mt-[2px] mb-0">
                 {loading
                   ? 'Searching the library…'
-                  : `${results.length} document${results.length === 1 ? '' : 's'} matching your search`}
+                  : query
+                    ? `${count} document${count === 1 ? '' : 's'} matching your search` +
+                      (search.response ? ` · ${search.response.latency_ms}ms` : '')
+                    : `${count} document${count === 1 ? '' : 's'} in the library`}
               </p>
             </div>
             <Button variant="ghost" className="ml-auto whitespace-nowrap" onClick={() => navigate('/discovery')}>
@@ -100,9 +124,29 @@ export function Results() {
             </Button>
           </div>
 
+          {search.response?.degraded && (
+            /* The keyword half still answered; only the semantic half is down.
+               Saying so beats silently returning worse results. */
+            <p className="text-[12.5px] opacity-65 m-0 mb-3">{search.response.degraded}</p>
+          )}
+
           {error ? (
             <p className="text-[13px] text-accent2-700 m-0">{error}</p>
-          ) : results.length ? (
+          ) : query ? (
+            hits.length ? (
+              <div className="flex flex-col gap-3">
+                {hits.map((hit) => (
+                  <SearchResultCard key={hit.template_id} result={hit} />
+                ))}
+              </div>
+            ) : !loading ? (
+              <EmptyState
+                title="Nothing matches that yet"
+                body="Only templates that finished indexing are searchable. Try fewer words, or clear the format filter."
+                action={{ label: 'Clear search', onClick: () => setParams({ q: '' }) }}
+              />
+            ) : null
+          ) : browse.length ? (
             <TableCard>
               <Table className="table-auto w-full min-w-[620px]">
                 <thead>
@@ -114,7 +158,7 @@ export function Results() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map((t) => (
+                  {browse.map((t) => (
                     <tr key={t.id}>
                       <td>
                         <div
