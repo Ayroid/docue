@@ -16,6 +16,7 @@ Two halves, and the split is the point:
   laptop is not a regression.
 """
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -196,6 +197,16 @@ def main() -> int:
     failures = check_guarantees()
     print(f"  {'PASS' if not failures else 'FAIL'} -- narrowing-only, drop-unknown, label-application")
 
+    # Opt-in, because this suite is picked up by the pytest runner and the live
+    # pass is neither free nor fast: 12 Bedrock calls, ~$0.27 and ~2 minutes
+    # every time anyone runs the suite. The offline guarantees are the part
+    # that must run on every commit; the live pass is what you run when you
+    # have changed a prompt.
+    if not os.environ.get("TEMPLATEHUB_LIVE_LLM"):
+        print("\nlive pass: SKIPPED (set TEMPLATEHUB_LIVE_LLM=1 to run it)")
+        print("  ~12 Bedrock calls, roughly $0.27 and two minutes.")
+        return _report(failures)
+
     print("\nbedrock preflight")
     available, reason = _bedrock_available()
     if not available:
@@ -217,6 +228,10 @@ def main() -> int:
             f"slowest {slowest}ms, ${cost:.4f} total"
         )
 
+    return _report(failures)
+
+
+def _report(failures: list[str]) -> int:
     print()
     if failures:
         print(f"llm classify: FAIL ({len(failures)})")
