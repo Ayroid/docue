@@ -474,9 +474,47 @@ def _check_spec_assertions(
         if region is not None:
             fresh = _read_region_content(data, fmt, region.region_id)
             actual = fresh
-        passed = actual is not None and str(actual).strip() == str(assertion.must_equal).strip()
+        passed = actual is not None and _values_match(assertion.must_equal, actual)
         outcomes.append(AssertionOutcome("value", assertion.ref, assertion.must_equal, actual, passed))
     return outcomes
+
+
+def _values_match(expected: Any, actual: Any) -> bool:
+    """Did the value land? String equality, with dates compared as dates.
+
+    A workbook date is a serial number wearing a number format, so writing
+    `2026-08-22` and reading it back yields `2026-08-22 00:00:00` -- the same
+    date, a different string. Comparing those as text fails an assertion on a
+    cell that is perfectly correct, and the fix is not to stop asserting on
+    dates: plan Appendix B calls the date round-trip out as the thing that
+    visibly breaks on a projector, so it is exactly what wants checking.
+
+    Only the date case is special-cased. Everything else stays exact -- a
+    tolerant comparison is how "we didn't actually change the venue" slips
+    through, which is the one failure functional QA exists to catch.
+    """
+    expected_text = str(expected).strip()
+    actual_text = str(actual).strip()
+    if expected_text == actual_text:
+        return True
+
+    from datetime import datetime
+
+    def _as_date(value: Any) -> Any:
+        text = str(value).strip()
+        for parse in (
+            lambda t: datetime.fromisoformat(t).date(),
+            lambda t: datetime.strptime(t, "%Y-%m-%d %H:%M:%S").date(),
+            lambda t: datetime.strptime(t, "%d-%b-%y").date(),
+        ):
+            try:
+                return parse(text)
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    expected_date, actual_date = _as_date(expected), _as_date(actual)
+    return expected_date is not None and expected_date == actual_date
 
 
 def _read_region_content(data: bytes, fmt: str, region_id: str) -> Any:

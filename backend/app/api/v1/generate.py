@@ -6,13 +6,12 @@ That line is described in the plan as "the whole project", and until now it only
 existed inside `scripts/`. This is it over HTTP.
 
 **Why this hangs off a version rather than a session.** Plan §6 puts compile and
-commit under `POST /sessions/{sid}/compile`, and it should end up there. But the
-conversational layer -- context agent, question planner, extractor, deriver --
-does not exist yet, and the deterministic half does not need it: a spec is a
-spec whether a model or a human wrote it. So the service lives here, addressed
-by the version it applies to, and `/sessions/{sid}/compile` becomes a thin
-wrapper that looks up the session's spec and calls this. Building it the other
-way round would have meant the compile path waiting on the conversation.
+commit under `POST /sessions/{sid}/compile`. They are there now -- but they call
+`compile_and_store` below rather than reimplementing it, because a spec is a
+spec whether a model or a human wrote it, and the deterministic half never
+needed the conversation. Building it the other way round would have meant the
+compile path waiting on the agent chain; instead the chain arrived to find its
+compiler already written and already tested.
 
 **Why the schema is re-detected rather than read from `document_regions`.** The
 regions are persisted, but a spec must be resolved against the schema of the
@@ -45,6 +44,7 @@ from app.models.change_spec import (
 from app.models.qa_run import OVERALL_FAIL, OVERALL_PASS, QaRun
 from app.models.template import Template
 from app.models.template_version import TemplateVersion
+from app.schemas.change_spec import ChangeSpec
 from app.schemas.generate import CompileRequest, CompileResponse
 from app.storage.s3 import delete_file, download_file, upload_file
 
@@ -89,23 +89,37 @@ def _fetch(version: TemplateVersion) -> bytes:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
-@router.post("/{template_id}/compile", response_model=CompileResponse)
-def compile_change_spec_endpoint(
-    template_id: uuid.UUID,
-    request: CompileRequest,
-    db: Session = Depends(get_db),
+def compile_and_store(
+    db: Session,
+    template: Template,
+    version: TemplateVersion,
+    spec: ChangeSpec,
+    *,
+    dry_run: bool,
+    publish: bool = False,
+    session_id: uuid.UUID | None = None,
 ) -> CompileResponse:
-    """Apply a Change Spec. `dry_run` returns the QA verdict and keeps nothing.
+    """Apply a Change Spec to a stored version. **The only path to bytes.**
+
+    Both the version-addressed endpoint below and the session endpoints in
+    `app/api/v1/sessions.py` come through here, and that is deliberate rather
+    than tidy. This function is what writes `change_specs`, `qa_runs` and the
+    resulting `TemplateVersion`, and it is what enforces QA as a *gate* rather
+    than a report. A second implementation would eventually differ on that last
+    point -- the two paths would drift on which one is allowed to keep bytes
+    that failed structural QA -- and the whole package-integrity claim rests on
+    the answer being "neither, ever".
+
+    `session_id` is recorded on the spec row when a conversation produced it.
+    Null is the honest value for a spec a human or a script wrote directly.
 
     The spec row is written whether or not the compile succeeds. A specification
     that failed QA is exactly the thing you want to still have afterwards -- it
     is the evidence for why no document was produced.
     """
-    template, version = _load(db, template_id, request.version_id)
-    spec = request.spec
-
     spec_row = ChangeSpecRow(
         id=uuid.uuid4(),
+        session_id=session_id,
         template_id=template.id,
         base_version_id=version.id,
         spec_version=spec.spec_version,
@@ -129,7 +143,7 @@ def compile_change_spec_endpoint(
             QaRun(
                 id=uuid.uuid4(),
                 change_spec_id=spec_row.id,
-                dry_run=request.dry_run,
+                dry_run=dry_run,
                 overall=OVERALL_FAIL,
                 structural={"error": str(exc)},
             )
@@ -142,7 +156,7 @@ def compile_change_spec_endpoint(
             QaRun(
                 id=uuid.uuid4(),
                 change_spec_id=spec_row.id,
-                dry_run=request.dry_run,
+                dry_run=dry_run,
                 overall=OVERALL_FAIL,
                 structural={"error": f"{type(exc).__name__}: {exc}"},
             )
@@ -162,7 +176,7 @@ def compile_change_spec_endpoint(
 
     # QA is a gate, not a report: bytes that failed it are never stored, even on
     # an explicit non-dry-run request.
-    if not request.dry_run and result.passed:
+    if not dry_run and result.passed:
         number = _next_version_number(db, template.id)
         suffix = version.storage_key.rsplit(".", 1)[-1]
         filename = f"{template.title} v{number}.{suffix}"
@@ -192,7 +206,7 @@ def compile_change_spec_endpoint(
             db.flush()
             spec_row.result_version_id = result_version.id
             spec_row.status = STATUS_COMMITTED
-            if request.publish:
+            if publish:
                 template.current_version_id = result_version.id
         except Exception as exc:  # noqa: BLE001
             db.rollback()
@@ -208,7 +222,7 @@ def compile_change_spec_endpoint(
         id=uuid.uuid4(),
         change_spec_id=spec_row.id,
         result_version_id=result_version.id if result_version else None,
-        dry_run=request.dry_run,
+        dry_run=dry_run,
         structural=report["structural"],
         functional=report["functional"],
         assertions=report["assertions"],
@@ -225,14 +239,14 @@ def compile_change_spec_endpoint(
         qa_run.overall,
         result.applied,
         len(result.dropped),
-        request.dry_run,
+        dry_run,
     )
 
     return CompileResponse(
         change_spec_id=spec_row.id,
         template_id=template.id,
         base_version_id=version.id,
-        dry_run=request.dry_run,
+        dry_run=dry_run,
         status=spec_row.status,
         overall=qa_run.overall,
         operations_submitted=spec.operation_count,
@@ -255,6 +269,29 @@ def compile_change_spec_endpoint(
         ),
         qa_run_id=qa_run.id,
         created_at=spec_row.created_at,
+    )
+
+
+@router.post("/{template_id}/compile", response_model=CompileResponse)
+def compile_change_spec_endpoint(
+    template_id: uuid.UUID,
+    request: CompileRequest,
+    db: Session = Depends(get_db),
+) -> CompileResponse:
+    """Apply a Change Spec addressed by version. `dry_run` keeps nothing.
+
+    The spec here arrives ready-made -- from a script, a test, or a human who
+    hand-wrote it. `POST /sessions/{sid}/compile` is the same operation with the
+    spec built from a conversation instead; both call `compile_and_store`.
+    """
+    template, version = _load(db, template_id, request.version_id)
+    return compile_and_store(
+        db,
+        template,
+        version,
+        request.spec,
+        dry_run=request.dry_run,
+        publish=request.publish,
     )
 
 
