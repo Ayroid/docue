@@ -317,7 +317,7 @@ def _paragraph_targets(op: Operation) -> tuple[int, int] | None:
             return (op.para_index, op.para_index)
     if isinstance(op, ReplaceBlockItemsOp):
         return op.para_span
-    if isinstance(op, (_ClonePargraphsOp, _RemoveParagraphsOp)):
+    if isinstance(op, (_CloneParagraphsOp, _RemoveParagraphsOp)):
         return op.para_span
     return None
 
@@ -570,7 +570,7 @@ class _DocumentEditor:
         """Insert `op.rows` at `op.at_row`. Returns (row index, payload) pairs."""
         if not op.rows:
             return []
-        table = self._table(op.table_index)
+        self._table(op.table_index)  # bounds check before anything is copied
         template = self._row(op.table_index, op.row_template_row)
         foreign = _has_foreign_content(template._tr)
         if foreign is not None:
@@ -600,9 +600,6 @@ class _DocumentEditor:
             self.cells_inserted += cells_per_row
 
         self.rows_inserted += len(op.rows)
-        # `table.rows` is recomputed from the tree, so the clones are visible
-        # immediately; the cached originals stay in original coordinates.
-        _ = table
         return placed
 
     @staticmethod
@@ -819,7 +816,7 @@ def _expand_block(op: ReplaceBlockItemsOp) -> list[Operation]:
         expanded.append(SetTextOp(para_index=first + offset, text=text, part=op.part))
     if len(op.items) > existing:
         expanded.append(
-            _ClonePargraphsOp(
+            _CloneParagraphsOp(
                 para_span=op.para_span, items=op.items[existing:], part=op.part
             )
         )
@@ -852,7 +849,7 @@ class _RowValuesOp:
 
 
 @dataclass
-class _ClonePargraphsOp:
+class _CloneParagraphsOp:
     """Grow a paragraph block. Internal: produced by expansion."""
 
     para_span: tuple[int, int]
@@ -900,7 +897,7 @@ def compile_change_spec(
     text_ops = [op for op in flat if isinstance(op, SetTextOp)]
     row_value_ops = [op for op in flat if isinstance(op, _RowValuesOp)]
     insert_ops = [op for op in flat if isinstance(op, CloneTableRowsOp)]
-    block_ops = [op for op in flat if isinstance(op, _ClonePargraphsOp)]
+    block_ops = [op for op in flat if isinstance(op, _CloneParagraphsOp)]
     removal_ops = [op for op in flat if isinstance(op, _RemoveParagraphsOp)]
 
     for op in clear_ops:
@@ -918,7 +915,7 @@ def compile_change_spec(
     for op in sorted(insert_ops, key=lambda op: op.at_row, reverse=True):
         row_placements.append((op, editor.insert_rows(op)))
 
-    block_placements: list[tuple[_ClonePargraphsOp, list[tuple[int, str]]]] = []
+    block_placements: list[tuple[_CloneParagraphsOp, list[tuple[int, str]]]] = []
     for op in sorted(
         block_ops + removal_ops, key=lambda op: op.para_span[1], reverse=True
     ):
@@ -958,7 +955,7 @@ def compile_change_spec(
 
 def _paragraph_shift(
     para_index: int,
-    block_ops: list[_ClonePargraphsOp],
+    block_ops: list[_CloneParagraphsOp],
     removal_ops: list[_RemoveParagraphsOp],
     exclude: tuple[int, int] | None,
 ) -> int:
@@ -994,9 +991,9 @@ def _assertions(
     text_ops: list[SetTextOp],
     row_value_ops: list[_RowValuesOp],
     row_placements: list[tuple[CloneTableRowsOp, list[tuple[int, dict[int, Any]]]]],
-    block_placements: list[tuple[_ClonePargraphsOp, list[tuple[int, str]]]],
+    block_placements: list[tuple[_CloneParagraphsOp, list[tuple[int, str]]]],
     insert_ops: list[CloneTableRowsOp],
-    block_ops: list[_ClonePargraphsOp],
+    block_ops: list[_CloneParagraphsOp],
     removal_ops: list[_RemoveParagraphsOp],
 ) -> list[DocxAssertion]:
     assertions: list[DocxAssertion] = []
