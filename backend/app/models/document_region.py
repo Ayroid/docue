@@ -61,5 +61,14 @@ class DocumentRegion(Base):
     row_template_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
     detection_method: Mapped[str] = mapped_column(String(30), nullable=False)
     question_group: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # `ordinal` is the detector's own, kept exactly as contract C3 hands it over.
+    # For a workbook it restarts at 0 on every sheet, so it is *not* a total
+    # order: BFL has four sheets and therefore four regions numbered 0. Ordering
+    # a region map by it alone returns rows in whatever order Postgres feels
+    # like, interleaving sheets.
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Position within the whole document, assigned at ingestion from the order
+    # the detector emits regions in -- which is sheet by sheet, slide by slide,
+    # paragraph by paragraph. This is what `GET /regions` sorts by.
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

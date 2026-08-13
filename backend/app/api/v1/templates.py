@@ -90,7 +90,12 @@ async def upload_template(
 
     if size == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
-    if buffer.getvalue()[:4] != ZIP_MAGIC:
+    # Taken before the S3 upload: boto3's transfer manager closes the file object
+    # it is handed, so reading `buffer` afterwards raises "I/O operation on closed
+    # file". The background task needs these bytes, so they are captured here
+    # while the buffer is still open.
+    payload = buffer.getvalue()
+    if payload[:4] != ZIP_MAGIC:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File content does not look like a valid Office Open XML document.",
@@ -145,9 +150,7 @@ async def upload_template(
 
     # Runs after the response is sent. The bytes are already in memory from
     # hashing, so they are handed over rather than re-fetched from S3.
-    background_tasks.add_task(
-        run_ingestion_job, job_id, template_id, version_id, buffer.getvalue()
-    )
+    background_tasks.add_task(run_ingestion_job, job_id, template_id, version_id, payload)
 
     return IngestionAccepted(
         template_id=template_id,
@@ -268,9 +271,10 @@ def get_regions(
 ) -> DocumentSchemaOut:
     """The persisted Document Schema. Defaults to the template's current version.
 
-    Regions come back in `ordinal` order, which is document order -- the
-    detectors sort by position before assigning it, so a caller can render a
-    region map straight down the page without re-sorting.
+    Regions come back in `sequence` order, which is document order across the
+    whole file. Not `ordinal`: that is the detector's own numbering and it
+    restarts at 0 on every sheet, so BFL has four regions numbered 0 and sorting
+    by it would interleave the sheets in whatever order Postgres returned them.
     """
     template, version = _version_for(db, template_id, version_id)
 
@@ -291,7 +295,7 @@ def get_regions(
     regions = (
         db.query(DocumentRegion)
         .filter(DocumentRegion.version_id == version.id)
-        .order_by(DocumentRegion.ordinal)
+        .order_by(DocumentRegion.sequence)
         .all()
     )
     counts: dict[str, int] = {}

@@ -139,6 +139,22 @@ def check_result(name: str, result: IngestionResult) -> list[str]:
         duplicates = sorted({i for i in ids if ids.count(i) > 1})
         failures.append(f"{name}: duplicate region_ids would violate the unique constraint: {duplicates}")
 
+    # `sequence` has to be a total order, which is the whole reason it exists
+    # alongside `ordinal`. The detectors number `ordinal` from 0 *per sheet*, so
+    # BFL emits four regions numbered 0; sorting a region map by it returned rows
+    # in whatever order Postgres chose, and the persisted order stopped matching
+    # the detected one. Guarding the invariant here keeps that from coming back.
+    sequences = [row["sequence"] for row in result.regions]
+    if sequences != list(range(len(result.regions))):
+        failures.append(
+            f"{name}: `sequence` is not a dense 0..n-1 total order: {sequences[:12]}"
+        )
+    # And the reason it can't just be `ordinal`: in a multi-sheet workbook that
+    # column repeats, so it cannot be an ORDER BY on its own.
+    ordinals = [row["ordinal"] for row in result.regions]
+    if len(ordinals) > 1 and len(set(ordinals)) < len(ordinals) and sequences == ordinals:
+        failures.append(f"{name}: `sequence` was copied from a non-unique `ordinal`")
+
     # The fail-safe default: nothing writable may also be protected.
     contradictory = [
         row["region_id"] for row in result.regions if row["editable"] and row["protected"]

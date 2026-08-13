@@ -85,7 +85,10 @@ class RegionOut(BaseModel):
     required: bool
     detection_method: str
     question_group: int | None = None
-    ordinal: int
+    ordinal: int = Field(
+        description="The detector's own numbering. Restarts per sheet; not a total order."
+    )
+    sequence: int = Field(description="Position within the whole document. Sort by this.")
     notes: dict[str, Any] | None = Field(
         default=None,
         description=(

@@ -458,6 +458,12 @@ def ingest(
             "stored specs addressing them cannot be trusted"
         )
 
+    # `sequence` is the document-wide position. The detector's `ordinal` restarts
+    # at 0 on every sheet, so four regions in BFL share ordinal 0 and sorting a
+    # region map by it returns them in arbitrary order. `schema.regions` is
+    # already in document order -- sheet by sheet, slide by slide -- so the
+    # enumeration index is the total order, and `ordinal` is left untouched
+    # because contract C3 says it is the detector's field.
     regions = [
         {
             "region_id": region.region_id,
@@ -471,9 +477,10 @@ def ingest(
             "required": bool(region.required),
             "detection_method": region.detection_method,
             "ordinal": region.ordinal,
+            "sequence": sequence,
             "notes": _jsonable(region.notes) or None,
         }
-        for region in schema.regions
+        for sequence, region in enumerate(schema.regions)
     ]
 
     return IngestionResult(

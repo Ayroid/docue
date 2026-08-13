@@ -82,7 +82,10 @@ def upgrade() -> None:
         sa.Column("row_template_ref", sa.String(200), nullable=True),
         sa.Column("detection_method", sa.String(30), nullable=False),
         sa.Column("question_group", sa.Integer(), nullable=True),
+        # The detector's own ordinal, which restarts per sheet and is therefore
+        # not a total order, plus the document-wide position that is.
         sa.Column("ordinal", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("sequence", sa.Integer(), nullable=False, server_default="0"),
         # Not decoration: carries a table's `columns` and `template_row`, a
         # block's `insert_at_row`, the docx caption's `caption_count_template`.
         # The compiler bridge reads it, so a schema without it is readable but
