@@ -120,36 +120,11 @@ export function TemplateDetail() {
             <DownloadIcon width={16} height={16} />
             Download
           </Button>
-          <Button asChild variant="primary">
-            <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
-              <Icon name="open_in_new" size={16} />
-              Open full page
-            </a>
-          </Button>
         </div>
       </div>
 
-      {/* Metadata strip — one cell per fact the server actually records. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { icon: 'verified', label: 'Status', value: doc.status },
-          { icon: 'history', label: 'Current version', value: `v${version?.version_number ?? 1}` },
-          { icon: 'database', label: 'Size', value: version ? formatBytes(version.size_bytes) : 'unknown' },
-          {
-            icon: 'calendar_today',
-            label: 'Last updated',
-            value: new Date(version?.created_at ?? doc.created_at).toLocaleDateString(),
-          },
-        ].map((m) => (
-          <div key={m.label} className="bg-surface border border-divider rounded-card p-4">
-            <div className="text-label-md uppercase text-neutral-600 mb-2">{m.label}</div>
-            <div className="flex items-center gap-2 text-body-lg font-semibold text-ink">
-              <Icon name={m.icon} size={18} className="text-accent" />
-              <span className="truncate capitalize">{m.value}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* No metadata strip: every fact it carried — status, version, size and
+          the date — is already in the File details panel beside the preview. */}
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
         <Panel className="min-w-0">
@@ -158,6 +133,15 @@ export function TemplateDetail() {
               Live preview
             </Tag>
             <span className="text-[11.5px] opacity-50 truncate">{doc.original_filename}</span>
+
+            {/* Sits with the preview it acts on rather than in the page header:
+                "open full page" means this pane, full width. */}
+            <Button asChild variant="primary" size="sm" className="ml-auto flex-none whitespace-nowrap">
+              <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
+                <Icon name="open_in_new" size={16} />
+                Open full page
+              </a>
+            </Button>
           </div>
 
           <DocumentPreview

@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import type { TemplateOut } from '@/services/templates'
 import { Button } from '@/components/ui/button'
-import { Icon } from '@/components/ui/icon'
 import { statusClass } from '@/data/catalog'
 
 
@@ -62,24 +61,16 @@ export function RealTemplateCard({ template }: { template: TemplateOut }) {
           Details
         </button>
 
-        <div className="ml-auto flex items-center gap-2">
-          {/* Opens the real file on a page of its own, in a new tab. A genuine
-              anchor rather than `window.open` so middle-click and ctrl-click do
-              what the user expects and no popup blocker gets involved. */}
-          <Button asChild variant="secondary" size="icon" className="w-9 h-9 rounded-md">
-            <a href={`/viewer/${template.id}`} target="_blank" rel="noopener noreferrer" title="View document">
-              <Icon name="visibility" size={18} />
-            </a>
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            className="whitespace-nowrap"
-            onClick={() => navigate(`/templates/${template.id}/generate`)}
-          >
-            Use template
-          </Button>
-        </div>
+        {/* No viewer shortcut here: Details carries the "open the file" link,
+            so the card's action row stays a single, unambiguous next step. */}
+        <Button
+          variant="primary"
+          size="sm"
+          className="ml-auto whitespace-nowrap"
+          onClick={() => navigate(`/templates/${template.id}/generate`)}
+        >
+          Use template
+        </Button>
       </div>
     </article>
   )
