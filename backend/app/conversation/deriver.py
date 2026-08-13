@@ -213,13 +213,12 @@ def derive_values(
         payload, {r.region_id for r in targets}, columns, keep_null=True
     )
 
-    basis_by_id = {
-        entry.get("region_id"): (entry.get("basis") or "").strip()
-        for entry in payload.get("entries", [])
-    }
-    confidence_by_id = {
-        entry.get("region_id"): entry.get("confidence") for entry in payload.get("entries", [])
-    }
+    # Same defensive read as everywhere else in this package: nested item shape
+    # is not guaranteed (see `app/ai/bedrock.py::complete_json`). An entry with
+    # no readable basis loses its value below, which is the intended direction.
+    entries = [e for e in payload.get("entries", []) if isinstance(e, dict)]
+    basis_by_id = {e.get("region_id"): str(e.get("basis") or "").strip() for e in entries}
+    confidence_by_id = {e.get("region_id"): e.get("confidence") for e in entries}
 
     for region_id, value in parsed.items():
         if value is None:

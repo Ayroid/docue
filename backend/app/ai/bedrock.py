@@ -158,11 +158,20 @@ def complete_json(
 ) -> dict[str, Any]:
     """One model call that must return an object matching `schema`.
 
-    The schema is handed to Bedrock as a forced tool, so the model's arguments
-    are validated against it before they reach us. It is also the enforcement
+    The schema is handed to Bedrock as a forced tool. It is the enforcement
     point for plan §10's contract -- the model emits *values*, never XML, never
-    a cell reference, never a file path. What it may name is fixed by the enums
-    the caller puts in the schema.
+    a cell reference, never a file path -- and what it may name is fixed by the
+    enums the caller puts in the schema.
+
+    **It is not, however, a guarantee about shape.** This docstring used to say
+    the arguments were "validated against it before they reach us, so a
+    malformed reply is not a failure mode the callers have to handle". That is
+    false, and it was proven false the first time the question planner ran
+    against real Bedrock: a schema declaring `questions` as an array of objects
+    with four required properties came back as an array of *strings*, and the
+    caller crashed on `item.get(...)`. Top-level keys are respected; nested item
+    shape is not reliably enforced. **Every caller must parse defensively** --
+    skip entries that are not the shape asked for, and count them.
 
     Raises `BedrockError` rather than returning a sentinel: every caller has a
     documented non-LLM fallback, and one that silently treated an error as an
@@ -213,11 +222,66 @@ def complete_json(
         )
     for block in response["output"]["message"]["content"]:
         if "toolUse" in block:
-            return block["toolUse"]["input"]
+            return _unwrap(block["toolUse"]["input"], schema, purpose)
     raise BedrockError(
         f"{purpose}: the model answered without calling {_EMIT_TOOL} "
         f"(stopReason={response.get('stopReason')})"
     )
+
+
+def _unwrap(payload: Any, schema: dict[str, Any], purpose: str) -> dict[str, Any]:
+    """Undo the double-encoding Bedrock sometimes applies to tool arguments.
+
+    Measured, not defensive programming for its own sake. Against a schema
+    declaring `{"questions": {"type": "array", ...}}`, the question planner got
+    back:
+
+        {"questions": "{\\"questions\\": [{\\"question_text\\": ...}]}"}
+
+    -- the *entire* payload, JSON-encoded, as the value of the one array key.
+    Iterating that yields characters, so every caller either crashed or silently
+    discarded a perfectly good answer and fell back. It cost the planner its
+    model output on every single call, invisibly, because the fallback works.
+
+    Three shapes are repaired here, all of them the same mistake at different
+    depths:
+
+      * the whole input arriving as a JSON string;
+      * a key whose schema says array/object holding a JSON string;
+      * that decoded string turning out to be the whole payload again, wrapping
+        the key we were already looking at.
+
+    Anything that does not decode is returned untouched for the caller's own
+    defensive parsing to reject. Every repair is logged -- this is a provider
+    quirk, and the day it stops happening the logs should say so.
+    """
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+            logger.warning("%s: tool input arrived as a JSON string; decoded it", purpose)
+        except ValueError:
+            return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    properties = schema.get("properties", {})
+    for key, spec in properties.items():
+        value = payload.get(key)
+        if not isinstance(value, str) or spec.get("type") not in ("array", "object"):
+            continue
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            continue
+        # The observed case: the string decodes to `{"questions": [...]}` when
+        # we are already standing on `questions`. Unwrap one level rather than
+        # handing the caller an object where it expects a list.
+        if isinstance(decoded, dict) and key in decoded:
+            decoded = decoded[key]
+        payload[key] = decoded
+        logger.warning("%s: %r arrived JSON-encoded; decoded it", purpose, key)
+
+    return payload
 
 
 def embed(texts: list[str], *, purpose: str = "embed", input_type: str = "search_document") -> list[list[float]]:

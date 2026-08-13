@@ -377,6 +377,13 @@ def main() -> int:  # noqa: PLR0915 - a linear end-to-end script reads better wh
         finally:
             db.close()
 
+    except Exception as exc:  # noqa: BLE001 - a crash is a failure, reported as one
+        # Without this the `finally` below ran with an empty `failures` list and
+        # printed PASS on the way out of an unhandled exception -- which it did,
+        # on the first live run, immediately above a traceback. A checker that
+        # says PASS while crashing is worse than no checker.
+        failures.append(f"{type(exc).__name__}: {exc}")
+        raise
     finally:
         _finish(server, failures, keep, template_id, keys_to_remove)
 

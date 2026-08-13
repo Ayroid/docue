@@ -227,10 +227,16 @@ def plan_questions(
 
     claimed: set[str] = set()
     for item in payload.get("questions", [])[:MAX_QUESTIONS]:
+        # Bedrock's forced-tool validation does not reliably enforce nested item
+        # shape -- this exact schema has returned an array of bare strings. See
+        # `app/ai/bedrock.py::complete_json`.
+        if not isinstance(item, dict) or not item.get("question_text"):
+            result.errors.append("planner returned a malformed question entry")
+            continue
         covers: list[str] = []
-        for region_id in item.get("covers_regions", []):
-            if region_id not in known_ids:
-                result.dropped_ids.append(region_id)
+        for region_id in item.get("covers_regions") or []:
+            if not isinstance(region_id, str) or region_id not in known_ids:
+                result.dropped_ids.append(str(region_id))
                 continue
             # A region claimed by two questions would be asked twice and
             # extracted twice, with the second answer silently winning. First
@@ -245,8 +251,8 @@ def plan_questions(
             PlannedQuestion(
                 question_no=len(result.questions) + 1,
                 question_text=item["question_text"],
-                hint=item.get("hint") or None,
-                example=item.get("example") or None,
+                hint=str(item["hint"]) if item.get("hint") else None,
+                example=str(item["example"]) if item.get("example") else None,
                 covers_regions=covers,
             )
         )

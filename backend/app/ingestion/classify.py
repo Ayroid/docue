@@ -216,21 +216,33 @@ def classify_regions(
             continue
 
         for item in payload.get("regions", []):
-            region_id = item.get("region_id", "")
-            if region_id not in known_ids:
+            # Nested item shape is not reliably enforced by the forced tool --
+            # see `app/ai/bedrock.py::complete_json`, where a schema declaring
+            # objects returned bare strings against real Bedrock. A malformed
+            # entry leaves its region with the structural label it already had,
+            # which is this stage's documented failure mode anyway.
+            if not isinstance(item, dict):
+                result.errors.append("classifier returned a malformed entry")
+                continue
+            region_id = item.get("region_id")
+            if not isinstance(region_id, str) or region_id not in known_ids:
                 # The injection barrier doing its job -- log it, never resolve it
                 # to "the closest match".
-                result.dropped_ids.append(region_id)
+                result.dropped_ids.append(str(region_id))
                 continue
-            label = RegionLabel(
-                region_id=region_id,
-                semantic_role=item["semantic_role"],
-                label=item["label"],
-                value_type=item["value_type"],
-                required=item["required"],
-                should_not_write=item["should_not_write"],
-                confidence=float(item["confidence"]),
-            )
+            try:
+                label = RegionLabel(
+                    region_id=region_id,
+                    semantic_role=str(item["semantic_role"]),
+                    label=str(item["label"]),
+                    value_type=str(item["value_type"]),
+                    required=bool(item["required"]),
+                    should_not_write=bool(item["should_not_write"]),
+                    confidence=float(item["confidence"]),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                result.errors.append(f"classifier entry for {region_id} was unusable: {exc}")
+                continue
             result.labels[region_id] = label
             if label.should_not_write:
                 result.refused_writes.append(region_id)

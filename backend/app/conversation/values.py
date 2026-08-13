@@ -123,10 +123,14 @@ def _rows(entry: dict[str, Any], columns: list[str] | None) -> list[dict[str, An
     allowed = set(columns or [])
     out: list[dict[str, Any]] = []
     for row in entry.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
         built: dict[str, Any] = {}
         for cell in row.get("cells") or []:
+            if not isinstance(cell, dict):
+                continue
             name = cell.get("column")
-            if not name:
+            if not name or not isinstance(name, str):
                 continue
             if allowed and name not in allowed:
                 logger.debug("dropping unknown column %r", name)
@@ -159,9 +163,15 @@ def parse_entries(
     dropped: list[str] = []
 
     for entry in payload.get("entries", []):
-        region_id = entry.get("region_id", "")
-        if region_id not in known_ids:
-            dropped.append(region_id)
+        # The forced tool does not reliably enforce nested item shape -- see
+        # `app/ai/bedrock.py::complete_json`. An entry that is not an object
+        # names no region, so there is nothing to write and nothing to guess.
+        if not isinstance(entry, dict):
+            logger.warning("dropping a malformed entry: %r", entry)
+            continue
+        region_id = entry.get("region_id")
+        if not isinstance(region_id, str) or region_id not in known_ids:
+            dropped.append(str(region_id))
             continue
         if region_id in values:
             continue

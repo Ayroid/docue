@@ -191,17 +191,29 @@ def assemble_context(
             continue
 
         for item in payload.get("regions", []):
-            region_id = item.get("region_id", "")
-            if region_id not in known_ids:
+            # Nested item shape is not reliably enforced by the forced tool --
+            # see `app/ai/bedrock.py::complete_json`. A malformed entry leaves
+            # its region unclassified, which the sweep below turns into
+            # `must_ask`: the safe direction.
+            if not isinstance(item, dict):
+                result.errors.append("context agent returned a malformed entry")
+                continue
+            region_id = item.get("region_id")
+            if not isinstance(region_id, str) or region_id not in known_ids:
                 # The injection barrier. Logged, never resolved to a near-match.
-                result.dropped_ids.append(region_id)
+                result.dropped_ids.append(str(region_id))
                 continue
             if region_id in seen:
                 continue
+            bucket = item.get("bucket")
+            if bucket not in BUCKETS:
+                result.errors.append(f"context agent returned bucket {bucket!r}")
+                continue
             seen.add(region_id)
-            getattr(result, item["bucket"]).append(region_id)
-            if item.get("reason"):
-                result.reasons[region_id] = item["reason"][:200]
+            getattr(result, bucket).append(region_id)
+            reason = item.get("reason")
+            if reason:
+                result.reasons[region_id] = str(reason)[:200]
 
     # Anything the model did not place -- omitted, misnamed, or lost to a failed
     # batch -- is asked about. The fail-safe direction is always more questions.
