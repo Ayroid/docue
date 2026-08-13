@@ -63,8 +63,17 @@ export function useIngestionJob(templateId: string | null, jobId: string | null)
   const [job, setJob] = useState<JobStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const startedAt = useRef<number>(0)
+  /* Whether there is a job to watch at all. Without this the hook cannot tell
+     "nothing uploaded yet" from "uploaded, first poll still in flight" -- both
+     leave `job` null -- and the caller ends up disabled on a job that does not
+     exist. */
+  const watching = Boolean(templateId && jobId)
 
   useEffect(() => {
+    // Dropped on every id change so a second upload does not inherit the first
+    // job's terminal status while its own first poll is still in flight.
+    setJob(null)
+    setError(null)
     if (!templateId || !jobId) return
 
     let cancelled = false
@@ -104,7 +113,10 @@ export function useIngestionJob(templateId: string | null, jobId: string | null)
   const status = job?.status ?? null
   return {
     job,
-    active: status === null || status === 'queued' || status === 'running',
+    // `status === null` still counts as active, but only while a job is being
+    // watched: it is the gap between the 202 landing and the first poll
+    // answering, and dropping it would flick the caller back to idle mid-run.
+    active: watching && (status === null || status === 'queued' || status === 'running'),
     failed: status === 'failed',
     enrichmentPending: status === 'succeeded' && !job?.enrichment?.embedded,
     ready: status === 'succeeded' && Boolean(job?.enrichment?.embedded),
