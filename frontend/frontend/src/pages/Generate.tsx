@@ -1,113 +1,130 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AGENT_QS, EXTRACTED, TIER_NOTES } from '@/data/demo'
-import { useHub, type Tier } from '@/store/HubProvider'
-import { buildChangeSpec, FIELDS_TOTAL, fieldsFilled, parseTemplate } from '@/features/generate/session'
-import { useDemoTemplate } from '@/features/generate/useDemoTemplate'
+import { useSession } from '@/features/generate/useSession'
 import { useLivePreview } from '@/features/preview/useLivePreview'
 import { LivePreviewPanel } from '@/features/preview/LivePreviewPanel'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
-import { Segmented } from '@/components/ui/segmented'
 import { Tag } from '@/components/ui/tag'
-import { DemoBadge, PageBody, PageHeading } from '@/components/common'
+import { EmptyState, PageBody, PageHeading } from '@/components/common'
 import { SparkleIcon } from '@/components/icons'
 
-const TIER_OPTIONS = [
-  { value: 'T1', label: 'T1' },
-  { value: 'T2', label: 'T2' },
-  { value: 'T3', label: 'T3' },
-] as const
-
+/**
+ * The fill conversation. Implementation Plan §5's headline screen.
+ *
+ * Chat on the left, live preview on the right, derivation counter along the
+ * bottom. Everything on it is real: the questions come from the question
+ * planner, the chips from the answer extractor, the preview from the Change
+ * Specification the server would compile, and the counter from the session's
+ * own progress.
+ *
+ * The tier picker is gone. It offered T1/T2/T3 as a per-question toggle, but
+ * the tier is fixed when the session starts — it shapes the question plan — so
+ * a control that appeared to change it mid-conversation was describing
+ * something that could not happen.
+ */
 export function Generate() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const { startSession, updateSession, sessions, saveDraft } = useHub()
-
-  /* Starts from the real document the Generate button came from — its title,
-     format and version are genuine even though the walkthrough itself is
-     scripted. */
-  const template = useDemoTemplate(id)
   const [chatInput, setChatInput] = useState('')
 
-  /* One session per visit, unless `?session=` names an existing one to resume
-     (the Drafts and My-documents rows link in that way). Creating a session
-     touches HubProvider's state, so it happens in an effect rather than
-     during render — React 18 flags setState-during-a-different-component's-
-     render even when, as here, it is idempotent. */
-  const requestedId = params.get('session')
-  const resumedId = requestedId && sessions[requestedId] ? requestedId : null
-  const [createdId, setCreatedId] = useState<string | null>(null)
-  /* Keyed on the route id, not `template.id` — the real template resolves
-     asynchronously, so `template` is still the fallback on the first render
-     and the session would otherwise remember that instead of the document the
-     user actually picked. */
-  useEffect(() => {
-    if (!resumedId && !createdId && id) setCreatedId(startSession(id).id)
-  }, [resumedId, createdId, id, startSession])
+  const resumeSessionId = params.get('session')
+  const state = useSession(id, { resumeSessionId })
+  const { loading, error, sending, session, original, done, send, reload } = state
 
-  const sessionId = resumedId ?? createdId
-  const session = sessionId ? sessions[sessionId] : undefined
-
-  useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [sessionId])
-
-  const answers = session?.answers ?? []
-  const qIndex = session?.qIndex ?? 0
-  const tier: Tier = session?.tier ?? 'T2'
-  const done = qIndex >= AGENT_QS.length
-
-  const original = useMemo(() => parseTemplate(template), [template])
-  const spec = useMemo(
-    () => buildChangeSpec(template, answers, tier, qIndex, chatInput),
-    [template, answers, tier, qIndex, chatInput],
-  )
-  const preview = useLivePreview(original, spec)
-
-  const sendAnswer = () => {
-    const v = chatInput.trim()
-    if (!v || done || !sessionId) return
-    const next = [...answers]
-    next[qIndex] = v
-    updateSession(sessionId, { answers: next, qIndex: qIndex + 1 })
+  const submit = async (skip = false) => {
+    const value = chatInput.trim()
+    if ((!value && !skip) || done || sending) return
     setChatInput('')
+    await send(value, { skip })
   }
 
-  /* The transcript is derived, not stored: questions up to the current index,
-     each followed by its answer and the chips the extractor pulled out of it. */
-  const messages: { text: string; role: 'agent' | 'user'; chips?: { key: string; value: string }[] }[] = []
-  for (let i = 0; i < AGENT_QS.length && i <= qIndex; i++) {
-    messages.push({ text: AGENT_QS[i].ask, role: 'agent' })
-    if (answers[i] !== undefined) messages.push({ text: answers[i], role: 'user', chips: EXTRACTED[i] })
-  }
-  if (done) {
-    messages.push({
-      text: 'Thanks — that is everything. 18 of 18 placeholders are filled. Generate the document when you are ready.',
-      role: 'agent',
-    })
+  if (loading) {
+    return (
+      <PageBody>
+        <PageHeading title="New document" subtitle="Reading the template and planning the questions…" />
+        <div className="bg-surface rounded-card p-6 text-[13px] opacity-60">
+          The context agent is deciding which regions need asking about. This takes a few seconds
+          the first time a document is used; after that the plan is cached.
+        </div>
+      </PageBody>
+    )
   }
 
-  const filled = fieldsFilled(answers.length)
-  const pct = Math.round((filled / FIELDS_TOTAL) * 100)
-  const liveTitle = answers[0] || chatInput.trim() || `${template.name} — untitled`
+  if (error || !session || !original) {
+    return (
+      <PageBody>
+        <EmptyState
+          title="Could not start a session"
+          body={error ?? 'The template has no detected regions yet — ingestion may still be running.'}
+          action={{ label: 'Try again', onClick: reload }}
+        />
+      </PageBody>
+    )
+  }
+
+  return <Conversation {...{ state, chatInput, setChatInput, submit, navigate }} />
+}
+
+/* Split out so the hooks below never run before the session has loaded — an
+   early return above a `useLivePreview` call would change the hook order
+   between renders. */
+function Conversation({
+  state,
+  chatInput,
+  setChatInput,
+  submit,
+  navigate,
+}: {
+  state: ReturnType<typeof useSession>
+  chatInput: string
+  setChatInput: (v: string) => void
+  submit: (skip?: boolean) => Promise<void>
+  navigate: ReturnType<typeof useNavigate>
+}) {
+  const {
+    session,
+    template,
+    questions,
+    currentQuestion,
+    pendingRegions,
+    original,
+    spec,
+    progress,
+    messages,
+    planSummary,
+    degraded,
+    warnings,
+    sending,
+    done,
+  } = state
+
+  const preview = useLivePreview(original!, spec)
+  const pct = progress.fields_total
+    ? Math.round((progress.fields_filled / progress.fields_total) * 100)
+    : 0
+
+  const protectedCount = original!.regions.filter((r) => r.protected).length
+  const answered = session!.turns.length
 
   return (
     <PageBody>
-      <div className="flex items-start gap-3 flex-wrap mb-[22px]">
-        <PageHeading
-          title="New document"
-          subtitle="Answer the agent questions and the document fills in as you go."
-          className="mb-0"
-        />
-        <DemoBadge className="mt-[10px]" />
-      </div>
+      <PageHeading
+        title="New document"
+        subtitle="Answer the agent's questions and the document fills in as you go."
+      />
 
-      <p className="text-[12.5px] opacity-60 -mt-[10px] mb-[18px] max-w-[70ch]">
-        This walkthrough is a demonstration. The questions and the filled-in preview are scripted, and the document
-        it creates is held in this tab only — nothing is written to the server.
-      </p>
+      {planSummary ? (
+        <p className="text-[12.5px] opacity-60 -mt-[10px] mb-[18px] max-w-[70ch]">{planSummary}.</p>
+      ) : null}
+
+      {degraded ? (
+        <div className="mb-4 rounded-card border border-dashed border-accent bg-accent-100 text-accent-900 py-[11px] px-[14px] text-[12.5px]">
+          Running without the language model — the questions are grouped structurally and only
+          what you type will be written. Nothing is invented.
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-5 items-stretch">
         {/* ── Conversation ─────────────────────────────────────────────── */}
@@ -119,18 +136,12 @@ export function Generate() {
             <div className="flex-1 min-w-0">
               <div className="font-semibold text-[14px]">Auto-fill agent</div>
               <div className="text-[11.5px] opacity-55">
-                {done ? 'All questions answered' : `Question ${qIndex + 1} of ${AGENT_QS.length}`}
+                {done ? 'All questions answered' : `Question ${answered + 1} of ${questions.length}`}
               </div>
             </div>
-            <div className="flex flex-col items-end gap-[5px]">
-              <Segmented
-                name="hubtier"
-                value={tier}
-                options={TIER_OPTIONS}
-                onChange={(t) => sessionId && updateSession(sessionId, { tier: t })}
-              />
-              <div className="text-[11.5px] opacity-55 text-right">{TIER_NOTES[tier]}</div>
-            </div>
+            <Tag variant="neutral" className="whitespace-nowrap">
+              {session!.tier}
+            </Tag>
           </div>
 
           <div className="flex-1 p-[18px] flex flex-col gap-3 overflow-y-auto">
@@ -156,6 +167,28 @@ export function Generate() {
                 ) : null}
               </div>
             ))}
+
+            {currentQuestion?.hint && !done ? (
+              <div className="text-[11.5px] opacity-50 pl-1">
+                {currentQuestion.hint}
+                {currentQuestion.example ? ` e.g. “${currentQuestion.example}”` : ''}
+              </div>
+            ) : null}
+
+            {done ? (
+              <div className="flex justify-start">
+                <div className="max-w-[82%] py-[11px] px-[14px] rounded-[12px] text-[14px] leading-[1.5] bg-accent-100 text-accent-900">
+                  That’s everything — {progress.fields_filled} of {progress.fields_total} regions
+                  are filled. Review and commit when you’re ready.
+                </div>
+              </div>
+            ) : null}
+
+            {warnings.map((w) => (
+              <div key={w} className="text-[11.5px] opacity-65 pl-1">
+                {w}
+              </div>
+            ))}
           </div>
 
           <div className="py-[14px] px-[18px] border-t border-divider flex gap-[10px] items-center">
@@ -165,41 +198,47 @@ export function Generate() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  sendAnswer()
+                  void submit()
                 }
               }}
-              placeholder={done ? 'All done' : AGENT_QS[qIndex].placeholder}
-              disabled={done}
+              placeholder={done ? 'All done' : 'Answer in your own words…'}
+              disabled={done || sending}
               rows={Math.min(5, Math.max(1, chatInput.split('\n').length + Math.floor(chatInput.length / 58)))}
               className="flex-1 resize-none leading-[1.5] max-h-[140px] min-h-0"
             />
             <Button
               variant="primary"
               className="whitespace-nowrap"
-              disabled={!chatInput.trim() || done}
-              onClick={sendAnswer}
+              disabled={!chatInput.trim() || done || sending}
+              onClick={() => void submit()}
             >
-              Send
+              {sending ? 'Reading…' : 'Send'}
             </Button>
             <Button
               variant="secondary"
               className="whitespace-nowrap"
-              disabled={answers.length === 0}
-              onClick={() => sessionId && saveDraft(sessionId, template.name, template.fmt)}
+              disabled={done || sending}
+              onClick={() => void submit(true)}
+              title="Leave these regions untouched"
             >
-              Save draft
+              Skip
             </Button>
           </div>
         </div>
 
         {/* ── Live preview ─────────────────────────────────────────────── */}
         <LivePreviewPanel
-          original={original}
+          original={original!}
           preview={preview}
-          title={liveTitle}
-          subtitle={`${template.name} v${template.version} · Yamaha Motor Solutions India`}
-          answersCaptured={answers.length}
-          totalQuestions={AGENT_QS.length}
+          title={template?.title ?? 'Untitled'}
+          subtitle={
+            template
+              ? `${template.title}${template.form_id ? ` · ${template.form_id}` : ''}`
+              : ''
+          }
+          answersCaptured={answered}
+          totalQuestions={questions.length}
+          pendingRegions={pendingRegions}
         />
       </div>
 
@@ -209,7 +248,7 @@ export function Generate() {
           <div
             className="w-8 h-8 rounded-pill grid place-items-center"
             style={{
-              background: `conic-gradient(var(--color-accent) ${Math.round((filled / FIELDS_TOTAL) * 360)}deg, var(--color-divider) 0)`,
+              background: `conic-gradient(var(--color-accent) ${Math.round(pct * 3.6)}deg, var(--color-divider) 0)`,
             }}
           >
             <div className="w-[22px] h-[22px] rounded-pill bg-surface grid place-items-center text-[9px] font-bold">
@@ -217,31 +256,23 @@ export function Generate() {
             </div>
           </div>
           <span className="text-[12.5px] opacity-65">
-            {answers.length} answers → {filled} of {FIELDS_TOTAL} fields
+            {answered} answer{answered === 1 ? '' : 's'} → {progress.fields_filled} of{' '}
+            {progress.fields_total} fields
           </span>
         </div>
 
-        <Tag variant="accent" className="whitespace-nowrap mx-auto hub-preserve-full">
-          Preserved: logo · sensitivity label · 27 merged ranges · 0 formulas touched
-        </Tag>
-        <Tag variant="accent" className="whitespace-nowrap mx-auto hub-preserve-short">
-          Preserved: 4 guarantees
+        {/* Counted from this document's own schema. The figures used to be
+            hardcoded to the MOM's, which made them decoration on anything else. */}
+        <Tag variant="accent" className="whitespace-nowrap mx-auto">
+          {protectedCount} protected region{protectedCount === 1 ? '' : 's'} never written
         </Tag>
 
         <div className="flex gap-[10px] flex-wrap ml-auto">
           <Button
-            variant="secondary"
-            className="whitespace-nowrap"
-            disabled={answers.length === 0}
-            onClick={() => sessionId && saveDraft(sessionId, template.name, template.fmt)}
-          >
-            Save draft
-          </Button>
-          <Button
             variant="primary"
             className="whitespace-nowrap"
-            disabled={!sessionId}
-            onClick={() => sessionId && navigate(`/generate/${sessionId}/review`)}
+            disabled={progress.fields_filled === 0}
+            onClick={() => navigate(`/generate/${session!.session_id}/review`)}
           >
             Review &amp; commit
           </Button>

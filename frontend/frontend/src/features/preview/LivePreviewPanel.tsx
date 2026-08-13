@@ -1,6 +1,4 @@
-import { PREVIEW_LINES } from '@/data/demo'
 import { Tag } from '@/components/ui/tag'
-import { PreviewLines } from '@/components/common'
 import type { LivePreview } from './useLivePreview'
 import type { ParsedDocument } from './types'
 
@@ -34,6 +32,7 @@ export function LivePreviewPanel({
   subtitle,
   answersCaptured,
   totalQuestions,
+  pendingRegions = [],
 }: {
   original: ParsedDocument
   preview: LivePreview
@@ -41,12 +40,17 @@ export function LivePreviewPanel({
   subtitle: string
   answersCaptured: number
   totalQuestions: number
+  /** Regions the question on screen will fill, marked so the user can see where
+      their answer is about to land. */
+  pendingRegions?: string[]
 }) {
   const { working, render, renderStatus, renderStale, fastPathMs } = preview
+  const pending = new Set(pendingRegions)
 
-  /* Branding and other protected regions are shown on the detail page's region
-     map, not here — this pane is about what the conversation is changing. */
-  const fields = working.regions.filter((r) => r.kind !== 'branding' && r.regionId !== 'doc.confidentiality')
+  /* Protected regions — branding, the revision block, anything unclassified —
+     are on the detail page's region map, not here. This pane is about what the
+     conversation is changing, and those are the regions it never will. */
+  const fields = working.regions.filter((r) => !r.protected && r.kind !== 'branding')
 
   const renderLabel =
     renderStatus === 'rendering' || renderStale
@@ -54,7 +58,7 @@ export function LivePreviewPanel({
       : renderStatus === 'ready'
         ? `Exact layout · rendered in ${render?.renderedInMs}ms`
         : renderStatus === 'failed'
-          ? 'Exact render unavailable — showing structure'
+          ? 'Structure only — the exact renderer is not wired up yet'
           : 'Structure only'
 
   const showAccurateRender = renderStatus === 'ready' && !renderStale
@@ -84,8 +88,10 @@ export function LivePreviewPanel({
       <table className="w-full border-collapse">
         <tbody>
           {fields.map((region) => {
-            const empty = !region.content
+            const rowCount = region.rows?.length ?? 0
+            const empty = !region.content && !rowCount
             const dashed = region.provenance === 'derived' || region.provenance === 'ai'
+            const awaiting = pending.has(region.regionId)
             return (
               <tr
                 key={region.regionId}
@@ -101,11 +107,18 @@ export function LivePreviewPanel({
                         empty ? 'opacity-35' : 'text-ink'
                       } ${dashed ? 'border border-dashed border-accent' : ''}`}
                     >
-                      {region.content || 'Waiting for your answer'}
+                      {rowCount
+                        ? `${rowCount} row${rowCount === 1 ? '' : 's'}`
+                        : region.content || (awaiting ? 'This question fills this' : 'Unchanged')}
                     </div>
                     {region.provenance === 'ai' && !empty ? (
                       <Tag variant="accent" className="whitespace-nowrap">
                         AI-drafted
+                      </Tag>
+                    ) : null}
+                    {awaiting && empty ? (
+                      <Tag variant="outline" className="whitespace-nowrap">
+                        Next
                       </Tag>
                     ) : null}
                   </div>
@@ -125,23 +138,19 @@ export function LivePreviewPanel({
         <span className="ml-auto text-[11px] opacity-30">structure in {fastPathMs.toFixed(0)}ms</span>
       </div>
 
-      <div className="mt-[9px] flex flex-col gap-[9px]">
-        {/* The simulated renderer hands back a `render://` URL with no bytes
-            behind it, so asking the browser for it only produces a failed
-            request in the console. Skip it and leave the skeleton standing;
-            a real render endpoint returning an http(s) URL still displays. */}
-        {showAccurateRender && !render!.pngUrl.startsWith('render://') ? (
-          <img
-            src={render!.pngUrl}
-            alt={`Rendered preview of ${original.title}`}
-            className="w-full rounded-[8px] bg-neutral-200"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none'
-            }}
-          />
-        ) : null}
-        <PreviewLines lines={PREVIEW_LINES.slice(0, 6)} flat />
-      </div>
+      {/* A real render endpoint returning an http(s) URL displays here. There
+          isn't one yet — LibreOffice rendering is a later phase — so nothing is
+          drawn rather than a placeholder that suggests a page was rasterised. */}
+      {showAccurateRender && !render!.pngUrl.startsWith('render://') ? (
+        <img
+          src={render!.pngUrl}
+          alt={`Rendered preview of ${original.title}`}
+          className="mt-[9px] w-full rounded-[8px] bg-neutral-200"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none'
+          }}
+        />
+      ) : null}
     </div>
   )
 }

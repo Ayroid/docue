@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import type { Fmt } from '@/data/catalog'
-import { PREVIEW_LINES } from '@/data/demo'
 import type { TemplateFormat } from '@/services/templates'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -73,10 +72,26 @@ export function DemoBadge({ className }: { className?: string }) {
   )
 }
 
+/* Bar widths for the body-text skeleton. Pure presentation — it lived in
+   `data/demo.ts` alongside the generation fixtures and came back here when
+   those were deleted, since it describes no document. */
+const PREVIEW_LINES = [
+  { h: '11px', w: '42%', mb: '18px' },
+  { h: '9px', w: '100%', mb: '9px' },
+  { h: '9px', w: '96%', mb: '9px' },
+  { h: '9px', w: '88%', mb: '22px' },
+  { h: '11px', w: '34%', mb: '18px' },
+  { h: '9px', w: '100%', mb: '9px' },
+  { h: '9px', w: '92%', mb: '9px' },
+  { h: '9px', w: '76%', mb: '22px' },
+  { h: '9px', w: '100%', mb: '9px' },
+  { h: '9px', w: '64%', mb: '0' },
+]
+
 /**
- * The grey bar skeleton standing in for rendered document body text, used by
- * the generation walkthrough's preview. Real documents are rendered from their
- * actual bytes by `features/document-preview` instead.
+ * The grey bar skeleton standing in for rendered document body text. Real
+ * documents are rendered from their actual bytes by `features/document-preview`
+ * instead.
  */
 export function PreviewLines({ lines = PREVIEW_LINES, flat = false }: { lines?: typeof PREVIEW_LINES; flat?: boolean }) {
   return (

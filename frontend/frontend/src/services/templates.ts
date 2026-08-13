@@ -156,6 +156,74 @@ export async function getTemplate(id: string): Promise<TemplateOut> {
   return res.json()
 }
 
+/* ── the document schema ────────────────────────────────────────────────── */
+
+/** One detected region. Field-for-field the backend's `RegionOut` (contract C3). */
+export interface RegionOut {
+  region_id: string
+  kind: string
+  label: string | null
+  /** What the region is *for*, written by the classifier. Null until enrichment runs. */
+  semantic_role: string | null
+  value_type: string | null
+  /** Polymorphic: `{sheet, ref}` | `{para_index, run_span}` | `{slide_index, shape_id}`. */
+  locator: Record<string, unknown>
+  current_content: string | null
+  editable: boolean
+  protected: boolean
+  required: boolean
+  detection_method: string
+  question_group: number | null
+  /** The detector's own numbering — restarts per sheet, so never sort by it. */
+  ordinal: number
+  /** Position within the whole document. Sort by this. */
+  sequence: number
+  notes: Record<string, unknown> | null
+}
+
+export interface DocumentSchemaOut {
+  template_id: string
+  version_id: string
+  format: TemplateFormat
+  detector_version: string
+  regions_detected: number
+  regions_writable: number
+  counts_by_kind: Record<string, number>
+  form_id: string | null
+  house_pattern: string | null
+  /** The `Ver.` the document claims about itself, from its own revision block. */
+  in_doc_version: string | null
+  created_at: string
+  regions: RegionOut[]
+}
+
+/**
+ * The persisted Document Schema for a version.
+ *
+ * A 404 here is routine rather than exceptional: the schema is written at the
+ * end of ingestion, so a template uploaded seconds ago legitimately has none
+ * yet. Callers should poll the ingestion job rather than treat it as an error.
+ */
+export async function getTemplateRegions(id: string, versionId?: string): Promise<DocumentSchemaOut> {
+  const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : ''
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/templates/${id}/regions${query}`)
+  } catch {
+    throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
+  }
+
+  if (!res.ok) {
+    const message =
+      res.status === 404
+        ? 'No region schema for this version yet — ingestion may still be running.'
+        : ((await detailOf(res)) ?? `Region lookup failed (${res.status}).`)
+    throw new TemplateApiError(res.status, message)
+  }
+
+  return res.json()
+}
+
 /** Raw file bytes for client-side preview — parsed and rendered entirely in
     the browser, never opened in Office or an Office Online iframe. */
 export async function downloadTemplateFile(id: string): Promise<ArrayBuffer> {
