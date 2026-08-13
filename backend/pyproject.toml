@@ -14,8 +14,10 @@ dependencies = [
     "openpyxl>=3.1.5",
     "psycopg2-binary>=2.9.12",
     "pydantic-settings>=2.15.0",
+    "python-docx>=1.2.0",
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.32",
+    "python-pptx>=1.0.2",
     "sqlalchemy>=2.0.52",
     "uvicorn[standard]>=0.52.1",
 ]
