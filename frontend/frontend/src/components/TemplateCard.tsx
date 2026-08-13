@@ -1,74 +1,86 @@
 import { useNavigate } from 'react-router-dom'
 import type { TemplateOut } from '@/services/templates'
-import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Tag } from '@/components/ui/tag'
-import { CHIP_BY_FORMAT, FormatChip } from '@/components/common'
-import { GenerateIcon } from '@/components/icons'
+import { Icon } from '@/components/ui/icon'
+import { statusClass } from '@/data/catalog'
+
 
 /**
  * A card for one real `GET /templates` row.
  *
- * Every field shown here comes off the record the server returned — title,
- * filename, format, size, upload date, version. The prototype's second card
- * component, which rendered invented owners, usage counts, categories and
- * one-line descriptions, is gone along with the seed data behind it.
+ * Laid out as the design system's template card: status tag in the corner,
+ * icon tile, title and subtitle, a two-column fact grid, then an action row.
+ *
+ * The design's card shows an owner and a description. The API records
+ * neither, so those slots carry facts the server does hold — format and file
+ * size — rather than inventing the ones it doesn't.
  */
 export function RealTemplateCard({ template }: { template: TemplateOut }) {
   const navigate = useNavigate()
   const version = template.current_version
 
-  const metaParts = [
-    version ? formatBytes(version.size_bytes) : 'size unknown',
-    version ? `Uploaded ${new Date(version.created_at).toLocaleDateString()}` : 'Upload date unknown',
-    template.status,
-  ]
+  /* Date only — the time of day was never what distinguishes one template
+     from another, and it is what forced the timestamp onto its own row. */
+  const updated = new Date(version?.created_at ?? template.created_at).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 
   return (
-    <div className="hub-tcard">
-      <div className="flex items-start gap-3">
-        <FormatChip size={40}>{CHIP_BY_FORMAT[template.format]}</FormatChip>
-        <div className="flex-1 min-w-0">
-          <div className="font-heading text-[16.5px] leading-[1.25] truncate">{template.title}</div>
-          <div className="text-[12px] opacity-60 mt-[3px] truncate">{template.original_filename}</div>
-        </div>
-        <Tag variant="accent2" className="flex-none">
-          v{version?.version_number ?? 1}
-        </Tag>
+    <article className="hub-tcard relative">
+      <span className={`${statusClass(template.status)} absolute top-4 right-4 uppercase`}>{template.status}</span>
+
+      {/* Two lines are reserved whether or not the title needs them, so the
+          facts below line up across every card in a row. */}
+      <div className="min-w-0 pr-20">
+        <h3 className="text-title-lg text-ink m-0 line-clamp-2 min-h-14" title={template.title}>
+          {template.title}
+        </h3>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap text-[11.5px] opacity-55">
-        {metaParts.map((part, i) => (
-          <span key={part} className="contents">
-            {i > 0 ? <span>·</span> : null}
-            <span className="whitespace-nowrap">{part}</span>
+      {/* One meta line instead of a labelled fact grid: format and version on
+          the left, the date it last changed on the right. `mt-auto` moved here
+          from the action row so the pair stays anchored to the card's foot. */}
+      <div className="mt-auto flex items-center justify-between gap-3 text-label-md text-neutral-600">
+        <span className="inline-flex items-center gap-2 min-w-0">
+          <span className="uppercase">{template.format}</span>
+          <span className="text-neutral-400" aria-hidden="true">
+            |
           </span>
-        ))}
+          <span>v{version?.version_number ?? 1}</span>
+        </span>
+        <span className="truncate">{updated}</span>
       </div>
 
-      <div className="flex gap-2 flex-wrap mt-[2px]">
-        {/* Starts the scripted generation walkthrough from this document. */}
-        <Button
-          variant="primary"
-          size="sm"
-          className="gap-[7px] whitespace-nowrap"
-          onClick={() => navigate(`/templates/${template.id}/generate`)}
+      <div className="flex items-center gap-2 border-t border-divider pt-4">
+        <button
+          type="button"
+          className="bg-transparent border-0 p-0 cursor-pointer font-[inherit] text-body-md text-accent hover:underline"
+          onClick={() => navigate(`/templates/${template.id}`)}
         >
-          <GenerateIcon width={14} height={14} />
-          Generate
-        </Button>
-        {/* Opens the real file on a page of its own, in a new tab. A genuine
-            anchor rather than `window.open` so middle-click and ctrl-click do
-            what the user expects and no popup blocker gets involved. */}
-        <Button asChild variant="secondary" size="sm">
-          <a href={`/viewer/${template.id}`} target="_blank" rel="noopener noreferrer">
-            View
-          </a>
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/templates/${template.id}`)}>
           Details
-        </Button>
+        </button>
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* Opens the real file on a page of its own, in a new tab. A genuine
+              anchor rather than `window.open` so middle-click and ctrl-click do
+              what the user expects and no popup blocker gets involved. */}
+          <Button asChild variant="secondary" size="icon" className="w-9 h-9 rounded-md">
+            <a href={`/viewer/${template.id}`} target="_blank" rel="noopener noreferrer" title="View document">
+              <Icon name="visibility" size={18} />
+            </a>
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            className="whitespace-nowrap"
+            onClick={() => navigate(`/templates/${template.id}/generate`)}
+          >
+            Use template
+          </Button>
+        </div>
       </div>
-    </div>
+    </article>
   )
 }

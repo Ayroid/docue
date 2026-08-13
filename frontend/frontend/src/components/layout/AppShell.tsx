@@ -1,27 +1,21 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useHub } from '@/store/HubProvider'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
-import { extOf } from '@/lib/utils'
+import { cn, extOf } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
+import { Icon } from '@/components/ui/icon'
 import { Avatar, FormatChip } from '@/components/common'
-import {
-  AnalyticsIcon,
-  ApprovalsIcon,
-  CheckIcon,
-  DocsIcon,
-  LibraryIcon,
-  LogoutIcon,
-  SettingsIcon,
-  SidebarIcon,
-  UploadIcon,
-} from '@/components/icons'
 
 /**
- * The signed-in shell: sticky sidebar, sticky header, and the two pieces of
- * global chrome the prototype hangs off the app root — the download toast and
- * the "sent for approval" dialog.
+ * The signed-in shell: a fixed brand bar with global search, a tab strip
+ * beneath it, and the two pieces of global chrome the app hangs off its root —
+ * the toast and the "sent for approval" dialog.
+ *
+ * The design puts navigation across the top rather than down the side, so the
+ * old sidebar's collapse toggle now drives a mobile nav drawer; `sidebarOpen`
+ * and `toggleSidebar` keep their meaning.
  */
 export function AppShell() {
   const { sidebarOpen, toggleSidebar, role, uploads, toast, uploadDialogOpen, closeUploadDialog, lastUpload, logout } =
@@ -29,9 +23,9 @@ export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [query, setQuery] = useState('')
 
-  /* The badge counts what the server actually holds. It used to read
-     `128 + templates.length - 12`, a number with no basis in anything. */
+  /* The badge counts what the server actually holds. */
   const { templates, loading: templatesLoading } = useRealTemplates()
 
   const signOut = () => {
@@ -40,143 +34,158 @@ export function AppShell() {
     navigate('/')
   }
 
+  const search = (e: FormEvent) => {
+    e.preventDefault()
+    navigate(`/search?q=${encodeURIComponent(query)}`)
+  }
+
   const navItems = [
-    {
-      to: '/discovery',
-      label: 'Discovery',
-      icon: <LibraryIcon />,
-      badge: templatesLoading ? '' : String(templates.length),
-    },
+    { to: '/discovery', label: 'Home', badge: '' },
+    { to: '/library', label: 'Templates', badge: templatesLoading ? '' : String(templates.length) },
     /* No badge: there is no generated-document backend, so any number here
        would be invented. */
-    { to: '/documents', label: 'My documents', icon: <DocsIcon />, badge: '' },
-    { to: '/analytics', label: 'Analytics', icon: <AnalyticsIcon />, badge: '' },
-    ...(role === 'Admin'
-      ? [{ to: '/admin', label: 'Admin', icon: <ApprovalsIcon />, badge: uploads.length ? String(uploads.length) : '' }]
-      : []),
+    { to: '/documents', label: 'My Documents', badge: '' },
+    { to: '/analytics', label: 'Analytics', badge: 'SOON' },
+    ...(role === 'Admin' ? [{ to: '/admin', label: 'Admin', badge: uploads.length ? String(uploads.length) : '' }] : []),
   ]
 
   /* Discovery owns the library, search, template detail, generate and review
-     routes — they all read as "browsing the library" in the sidebar. */
-  const isDiscoveryBranch =
+     routes. `/library` has its own tab, so it is excluded here. */
+  const isHomeBranch =
     location.pathname === '/discovery' ||
-    location.pathname.startsWith('/library') ||
     location.pathname.startsWith('/search') ||
     location.pathname.startsWith('/templates') ||
     location.pathname.startsWith('/generate')
 
-  const currentNav = isDiscoveryBranch
+  const currentNav = isHomeBranch
     ? '/discovery'
     : navItems.find((i) => location.pathname.startsWith(i.to) && i.to !== '/discovery')?.to
 
   return (
-    <div className="flex min-h-screen items-stretch">
-      {sidebarOpen ? (
-        <aside className="w-[250px] flex-none bg-surface py-5 px-4 flex flex-col gap-[6px] sticky top-0 h-screen">
-          <Button
-            className="flex items-center gap-[10px] justify-start py-[6px] px-2 mb-[14px]"
-            onClick={() => navigate('/')}
-          >
-            <div className="w-[30px] h-[30px] rounded-pill bg-accent grid place-items-center text-bg font-heading text-[14px]">
-              T
+    <div className="min-h-screen flex flex-col bg-bg">
+      <header className="fixed top-0 inset-x-0 z-40 bg-surface border-b border-divider">
+        <div className="h-16 max-w-container mx-auto px-[clamp(16px,3vw,32px)] flex items-center justify-between gap-6">
+          <Link to="/discovery" className="flex items-center gap-3 shrink-0 no-underline">
+            <div className="w-10 h-10 rounded-md bg-accent2-900 text-white grid place-items-center">
+              <Icon name="hub" size={22} />
             </div>
-            <span className="font-heading text-[15px]">Template Hub</span>
-          </Button>
+            <span className="font-heading text-headline-md text-accent2-900 tracking-tight hidden sm:block">
+              TemplateHub
+            </span>
+          </Link>
 
-          {/* Plain Link, not NavLink: NavLink applies its own `aria-current`
-              after spreading props, which clobbers the branch mapping above —
-              /library, /search and /templates/* would then highlight nothing.
-              `.hub-nav[aria-current='page']` is what the CSS styles, so
-              `currentNav` needs to be the only thing setting it. */}
-          {navItems.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              className="hub-nav"
-              aria-current={currentNav === item.to ? 'page' : undefined}
-            >
-              <span className="flex w-[18px] h-[18px] flex-none">{item.icon}</span>
-              <span className="flex-1">{item.label}</span>
-              <span className="text-[11px] opacity-55">{item.badge}</span>
-            </Link>
-          ))}
-
-          <div className="mt-auto pt-4">
-            <Button
-              variant="primary"
-              className="justify-start gap-[9px] py-[10px] px-[14px] w-full"
-              onClick={() => navigate('/upload')}
-            >
-              <UploadIcon width={16} height={16} />
-              Upload template
-            </Button>
-          </div>
-
-          <div className="pt-4 border-t border-divider flex items-center gap-[10px] relative">
-            <Avatar initials="RM" />
-            <div className="flex-1 min-w-0">
-              <div className="text-[13.5px] font-semibold truncate">Riya Mehta</div>
-              <div className="text-[11.5px] opacity-55">
-                {role === 'Admin' ? 'Delivery · Doc control admin' : 'Delivery · Consultant'}
-              </div>
+          <form onSubmit={search} className="flex-1 max-w-2xl hidden md:block">
+            <div className="relative flex items-center">
+              <Icon name="search" size={20} className="absolute left-4 text-neutral-500 pointer-events-none" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search templates…"
+                aria-label="Search templates"
+                className="input pl-12"
+              />
             </div>
+          </form>
+
+          <div className="flex items-center gap-2 relative">
             <Button
               variant="bare"
               size="icon"
-              title="Settings"
-              onClick={() => setSettingsOpen((v) => !v)}
+              className="md:hidden hover:bg-neutral-200"
+              title="Menu"
+              onClick={toggleSidebar}
             >
-              <SettingsIcon width={17} height={17} />
+              <Icon name={sidebarOpen ? 'close' : 'menu'} size={22} />
             </Button>
+            <Button variant="bare" size="icon" className="hover:bg-neutral-200 text-neutral-700" title="Notifications">
+              <Icon name="notifications" size={22} />
+            </Button>
+            <button
+              type="button"
+              className="flex items-center gap-3 ml-1 bg-transparent border-0 cursor-pointer font-[inherit] p-0"
+              onClick={() => setSettingsOpen((v) => !v)}
+              title="Account"
+            >
+              <div className="text-right hidden lg:block">
+                <div className="text-body-md font-bold text-ink leading-none">Riya Mehta</div>
+                <div className="text-label-md text-neutral-700 uppercase mt-[3px]">
+                  {role === 'Admin' ? 'Doc control' : 'Consultant'}
+                </div>
+              </div>
+              <Avatar initials="RM" size={32} />
+            </button>
 
             {settingsOpen ? (
-              <div className="elev-lg absolute bottom-[46px] right-0 w-[180px] bg-neutral-100 rounded-[12px] p-[6px] z-20">
-                <button
-                  type="button"
-                  className="hub-nav"
-                  onClick={signOut}
-                >
-                  <span className="flex w-[18px] h-[18px] flex-none">
-                    <LogoutIcon width={17} height={17} />
-                  </span>
+              <div className="elev-lg absolute top-[52px] right-0 w-[190px] bg-surface border border-divider rounded-lg p-[6px] z-20">
+                <button type="button" className="hub-nav hub-nav-stacked" onClick={signOut}>
+                  <Icon name="logout" size={18} />
                   <span className="flex-1 text-left">Log out</span>
                 </button>
               </div>
             ) : null}
           </div>
-        </aside>
-      ) : null}
+        </div>
 
-      <main className="flex-1 min-w-0 flex flex-col">
-        <header className="flex items-center gap-4 py-[18px] px-[clamp(18px,3vw,36px)] sticky top-0 bg-bg z-[5]">
-          <Button
-            variant="secondary"
-            size="icon"
-            className="flex-none"
-            title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
-            onClick={toggleSidebar}
-          >
-            <SidebarIcon width={17} height={17} />
-          </Button>
-
-          {/* The notifications bell is gone with the five invented alerts it
-              opened; nothing generates notifications yet. */}
-          <div className="ml-auto flex items-center gap-[10px]">
-            <Avatar initials="RM" />
+        <nav className="bg-surface border-t border-divider">
+          <div className="max-w-container mx-auto px-[clamp(16px,3vw,32px)] h-12 hidden md:flex items-center gap-8">
+            {navItems.map((item) => (
+              /* Plain Link, not NavLink: NavLink applies its own `aria-current`
+                 after spreading props, which clobbers the branch mapping above —
+                 /search and /templates/* would then highlight nothing. */
+              <Link key={item.to} to={item.to} className="hub-nav" aria-current={currentNav === item.to ? 'page' : undefined}>
+                {item.label}
+                {item.badge ? (
+                  <span className="text-[10px] leading-none bg-neutral-300 text-neutral-700 rounded px-[5px] py-[3px]">
+                    {item.badge}
+                  </span>
+                ) : null}
+              </Link>
+            ))}
           </div>
-        </header>
 
-        <Outlet />
+          {/* Mobile drawer, driven by the same toggle the sidebar used. */}
+          {sidebarOpen ? (
+            <div className="md:hidden px-[clamp(16px,3vw,32px)] pb-3 flex flex-col gap-1">
+              {navItems.map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className="hub-nav hub-nav-stacked"
+                  aria-current={currentNav === item.to ? 'page' : undefined}
+                  onClick={toggleSidebar}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          ) : null}
+        </nav>
+      </header>
+
+      <main className={cn('flex-1 w-full', sidebarOpen ? 'pt-16 md:pt-28' : 'pt-16 md:pt-28')}>
+        <div className="max-w-container mx-auto px-[clamp(16px,3vw,32px)] py-8">
+          <Outlet />
+        </div>
       </main>
 
+      <footer className="border-t border-divider bg-surface">
+        <div className="max-w-container mx-auto px-[clamp(16px,3vw,32px)] h-14 flex items-center justify-between gap-4 text-label-md text-neutral-600">
+          <span>YMSLI Internal Use Only</span>
+          <span className="hidden sm:block">© {new Date().getFullYear()} TemplateHub</span>
+        </div>
+      </footer>
+
       {toast ? (
-        <div className="fixed right-6 bottom-6 z-30 flex items-center gap-[11px] bg-accent-100 text-accent-900 rounded-[12px] py-[13px] px-4 shadow-elev-lg animate-hubfade">
-          <CheckIcon width={17} height={17} />
-          <span className="text-[13.5px]">{toast}</span>
+        <div className="fixed right-6 bottom-6 z-50 flex items-center gap-3 bg-accent2-900 text-white rounded-lg py-3 px-4 shadow-elev-lg animate-hubfade">
+          <Icon name="check_circle" size={20} filled />
+          <span className="text-body-md">{toast}</span>
         </div>
       ) : null}
 
-      <Dialog open={uploadDialogOpen} onOpenChange={closeUploadDialog} title="Sent for approval"
+      <Dialog
+        open={uploadDialogOpen}
+        onOpenChange={closeUploadDialog}
+        title="Sent for approval"
         actions={
           <Button variant="primary" onClick={closeUploadDialog}>
             Done
@@ -184,17 +193,17 @@ export function AppShell() {
         }
       >
         <div className="dialog-body">
-          <div className="flex items-center gap-3 bg-surface rounded-[12px] py-[13px] px-[15px] mb-4">
+          <div className="flex items-center gap-3 bg-neutral-200 rounded-lg py-3 px-4 mb-4">
             <FormatChip size={34}>{lastUpload?.fmt ?? 'DOC'}</FormatChip>
             <div className="flex-1 min-w-0">
-              <div className="text-[13.5px] font-semibold truncate">
+              <div className="text-body-md font-semibold truncate">
                 {lastUpload ? `${lastUpload.name}${extOf(lastUpload.fmt)}` : 'Your upload'}
               </div>
-              <div className="text-[11.5px] opacity-55">{lastUpload?.meta ?? 'uploaded just now'}</div>
+              <div className="text-label-md text-neutral-600">{lastUpload?.meta ?? 'uploaded just now'}</div>
             </div>
           </div>
-          Doc control has been notified by email and in the hub. Once an admin approves it, the template is
-          published to Discovery for everyone.
+          Doc control has been notified by email and in the hub. Once an admin approves it, the template is published
+          to Discovery for everyone.
         </div>
       </Dialog>
     </div>

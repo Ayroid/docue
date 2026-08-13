@@ -3,6 +3,7 @@ import type { Fmt } from '@/data/catalog'
 import type { TemplateFormat } from '@/services/templates'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Icon } from '@/components/ui/icon'
 
 /** Real templates carry a file extension; the chip speaks the prototype's Fmt. */
 export const CHIP_BY_FORMAT: Record<TemplateFormat, Fmt> = {
@@ -27,12 +28,14 @@ export function FormatChip({
   tone?: 'accent' | 'accent2'
   className?: string
 }) {
-  const fontSize = size >= 40 ? 10 : size >= 34 ? 9.5 : 9
+  const fontSize = size >= 40 ? 11 : size >= 34 ? 10 : 9.5
   return (
     <div
       className={cn(
-        'flex-none rounded-pill grid place-items-center font-heading',
-        tone === 'accent' ? 'bg-accent-200 text-accent-800' : 'bg-accent2-200 text-accent2-900',
+        /* A rounded square tile, as the design uses for document icons —
+           not the prototype's circular disc. */
+        'flex-none rounded-md grid place-items-center font-semibold tracking-wide',
+        tone === 'accent' ? 'bg-accent-100 text-accent-700' : 'bg-accent2-100 text-accent2-700',
         className,
       )}
       style={{ width: size, height: size, fontSize }}
@@ -46,7 +49,7 @@ export function FormatChip({
 export function Avatar({ initials, size = 34 }: { initials: string; size?: number }) {
   return (
     <div
-      className="flex-none rounded-pill bg-accent2-300 text-accent2-900 grid place-items-center text-[13px] font-bold"
+      className="flex-none rounded-pill bg-accent2-900 text-white grid place-items-center text-[12px] font-bold"
       style={{ width: size, height: size }}
     >
       {initials}
@@ -55,8 +58,13 @@ export function Avatar({ initials, size = 34 }: { initials: string; size?: numbe
 }
 
 /**
- * Marks a screen whose content is scripted rather than real. Used across the
- * generation walkthrough, which has no service behind it — see `data/demo.ts`.
+ * Marks a screen whose content is held in this tab only.
+ *
+ * It used to mean "scripted": the generation walkthrough had no service behind
+ * it and everything on it came from `data/demo.ts`. That is no longer true —
+ * documents are compiled by the backend and stored as real versions. What is
+ * still tab-local is the *list* of them, because there is no per-user document
+ * history endpoint yet, so the two pages below lose their rows on reload.
  */
 export function DemoBadge({ className }: { className?: string }) {
   return (
@@ -65,7 +73,7 @@ export function DemoBadge({ className }: { className?: string }) {
         'inline-flex items-center gap-[6px] rounded-tag border border-dashed border-accent2-400 bg-accent2-100 text-accent2-900 text-[11px] font-semibold uppercase tracking-[.08em] py-[3px] px-[9px] whitespace-nowrap',
         className,
       )}
-      title="Scripted walkthrough — the document produced here is not stored anywhere"
+      title="This list is held in your browser only — the documents themselves are stored server-side"
     >
       Demo
     </span>
@@ -123,17 +131,24 @@ export function EmptyState({
   action?: { label: string; onClick: () => void }
   size?: 'lg' | 'md'
 }) {
-  const disc = size === 'lg' ? 76 : 72
+  const disc = size === 'lg' ? 72 : 64
   return (
-    <div className={cn('text-center', size === 'lg' ? 'py-16 px-5' : 'py-14 px-5')}>
+    <div
+      className={cn(
+        'text-center bg-surface border border-divider rounded-card',
+        size === 'lg' ? 'py-16 px-5' : 'py-12 px-5',
+      )}
+    >
       <div
-        className="rounded-pill bg-accent2-100 mx-auto mb-[18px]"
+        className="rounded-pill bg-neutral-200 text-neutral-500 mx-auto mb-5 grid place-items-center"
         style={{ width: disc, height: disc }}
-      />
-      <h4 className="mb-2">{title}</h4>
-      <p className="opacity-65 text-[14px] max-w-[38ch] mx-auto mb-[18px]">{body}</p>
+      >
+        <Icon name="folder_open" size={30} />
+      </div>
+      <h4 className="mb-2 text-title-lg">{title}</h4>
+      <p className="text-neutral-700 text-body-md max-w-[46ch] mx-auto mb-5">{body}</p>
       {action ? (
-        <Button variant="secondary" onClick={action.onClick}>
+        <Button variant="primary" onClick={action.onClick}>
           {action.label}
         </Button>
       ) : null}
@@ -156,19 +171,18 @@ export function PageHeading({
   children?: ReactNode
 }) {
   return (
-    <div className={cn(center ? 'text-center mb-[18px]' : 'mb-[22px]', className)}>
+    <div className={cn(center && 'text-center', className)}>
       {children}
-      <h2 className="text-[clamp(26px,3vw,36px)] mb-1">{title}</h2>
-      {subtitle ? <p className="opacity-65 text-[14px] m-0">{subtitle}</p> : null}
+      <h2 className="text-headline-lg text-ink mb-1">{title}</h2>
+      {subtitle ? <p className="text-neutral-700 text-body-md m-0">{subtitle}</p> : null}
     </div>
   )
 }
 
-/** The standard page frame: consistent gutters and the entry animation. */
+/**
+ * The standard page frame. Gutters and the max width now come from AppShell's
+ * container, so this only supplies vertical rhythm and the entry animation.
+ */
 export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn('pt-[6px] px-[clamp(18px,3vw,36px)] pb-12 animate-hubfade-fast', className)}>
-      {children}
-    </div>
-  )
+  return <div className={cn('flex flex-col gap-8 animate-hubfade-fast', className)}>{children}</div>
 }
