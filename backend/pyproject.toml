@@ -22,5 +22,17 @@ dependencies = [
     "uvicorn[standard]>=0.52.1",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The suites shell out to `scripts/test_*.py`, which print reports worth reading.
+# `-ra` surfaces the skip reasons -- a skipped suite means a corpus file is
+# missing on this machine, and that should never pass by unnoticed.
+addopts = "-ra"
