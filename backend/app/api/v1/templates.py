@@ -46,6 +46,15 @@ def _to_template_out(template: Template, version: TemplateVersion | None) -> Tem
         status=template.status,
         form_id=template.form_id,
         house_pattern=template.house_pattern,
+        purpose=template.purpose,
+        when_to_use=template.when_to_use,
+        audience=template.audience,
+        category=template.category,
+        tags=list(template.tags or []),
+        # Derived rather than stored: "has a vector" is what actually decides
+        # whether semantic search can return this template, so it is read from
+        # the column that decides it instead of a flag that could disagree.
+        searchable=template.embedding is not None,
         current_version_id=template.current_version_id,
         created_at=template.created_at,
         updated_at=template.updated_at,

@@ -111,3 +111,16 @@ def test_region_output_carries_what_track_c_needs(field: str) -> None:
     from app.schemas.ingestion import RegionOut
 
     assert field in RegionOut.model_fields
+
+
+def test_template_output_exposes_the_generated_metadata() -> None:
+    """The library card's whole job is saying what a template is *for*.
+
+    Same class of bug as the dropped enrichment block: the columns exist, the
+    enrichment pass fills them, and a response model that omits them makes them
+    invisible to the frontend with no error anywhere.
+    """
+    from app.schemas.template import TemplateOut
+
+    for field in ("purpose", "when_to_use", "audience", "category", "tags", "searchable"):
+        assert field in TemplateOut.model_fields, f"TemplateOut drops {field}"
