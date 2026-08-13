@@ -43,7 +43,19 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["EnrichmentResult", "enrich", "persist_enrichment", "run_enrichment"]
 
-ENRICHMENT_VERSION = "enrichment/1.0.0"
+ENRICHMENT_VERSION = "enrichment/1.0.1"
+
+# `document_regions.semantic_role` is VARCHAR(100). A model that answers with a
+# sentence rather than a label overflows it, and Postgres fails the *statement*,
+# which poisons the transaction -- so an over-long role is not a cosmetic
+# problem, it takes the whole enrichment down. Clamped at the boundary that
+# knows the limit rather than trusted to the prompt alone.
+SEMANTIC_ROLE_MAX = 100
+
+
+def _role(text: str) -> str:
+    text = (text or "").strip()
+    return text if len(text) <= SEMANTIC_ROLE_MAX else text[: SEMANTIC_ROLE_MAX - 1].rstrip() + "…"
 
 
 @dataclass
@@ -153,7 +165,7 @@ def persist_enrichment(
             label = labels.get(row.region_id)
             if label is None:
                 continue
-            row.semantic_role = label.semantic_role
+            row.semantic_role = _role(label.semantic_role)
             if label.label:
                 row.label = label.label
             if label.value_type != "none":
@@ -164,7 +176,7 @@ def persist_enrichment(
             if label.should_not_write and row.editable:
                 row.editable = False
             notes = dict(row.notes or {})
-            notes["semantic_role"] = label.semantic_role
+            notes["semantic_role"] = _role(label.semantic_role)
             notes["llm_confidence"] = label.confidence
             notes["classified_by"] = CLASSIFIER_VERSION
             row.notes = notes
