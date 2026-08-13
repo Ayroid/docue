@@ -1,7 +1,7 @@
 /**
- * Client for the real `/api/v1/templates` endpoints. Upload, list,
- * fetch-by-id and download are the routes that exist on the backend today;
- * search, versions and delete aren't built yet.
+ * Client for the real `/api/v1` endpoints: upload, ingestion-job status, list,
+ * fetch-by-id, regions, download, and search. Versions and delete aren't built
+ * on the backend yet.
  */
 
 /* Relative on purpose: Vite proxies `/api` to the backend (see `vite.config.ts`),

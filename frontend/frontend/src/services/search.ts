@@ -1,12 +1,14 @@
 import type { TemplateOut } from '@/services/templates'
 
 /**
- * Client-side stand-in for a real search endpoint, over the templates the
- * backend actually returned.
+ * Local **browse** filter over the templates the backend already returned —
+ * not search. Real search is `searchTemplates()` in `@/services/templates`,
+ * which calls `POST /api/v1/search` and returns ranked hits with per-signal
+ * scores; use it for anything the user typed a query into.
  *
- * `GET /templates` is unpaginated and small, so filtering in the browser is
- * honest and immediate. When a real `POST /search` exists this signature is
- * what it should replace.
+ * This is what backs the empty-query library view and Discovery's rail, where
+ * there is no query to rank and a round trip would buy nothing. `GET /templates`
+ * is unpaginated and small, so filtering in the browser is honest and immediate.
  *
  * The invented relevance scoring that used to live here — semantic similarity,
  * team usage, recency, and a "why this matched" breakdown — is gone. Those
