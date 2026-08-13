@@ -158,6 +158,42 @@ def write_metadata(schema: Any, *, filename: str) -> TemplateMetadata:
         purpose=payload["purpose"],
         when_to_use=payload["when_to_use"],
         audience=payload["audience"],
-        tags=[t for t in payload["tags"] if t][:12],
+        tags=_tags(payload.get("tags")),
         category=payload["category"],
     )
+
+
+def _tags(raw: Any) -> list[str]:
+    """Coerce whatever came back into a list of tags.
+
+    The schema says `array of string` and Bedrock validates tool arguments
+    against it -- but not strictly enough to rely on: three of five corpus
+    documents came back with `tags` as one comma-separated *string*, which a
+    plain list comprehension then iterates character by character. The stored
+    tags became `['M', 'O', 'M', ',', ' ', ...]`, and since tags are part of
+    the embedded text, that silently poisons search rather than failing.
+
+    Validate at the boundary; never trust a model's container type.
+    """
+    if isinstance(raw, str):
+        text = raw.strip()
+        # Seen in the wild from the same schema: a real JSON array delivered as
+        # a string. Parse it as one before falling back to splitting, or every
+        # tag keeps a stray quote and the first and last keep a bracket.
+        if text.startswith("["):
+            try:
+                raw = json.loads(text)
+            except json.JSONDecodeError:
+                raw = text.split(",")
+        else:
+            raw = text.split(",")
+    if not isinstance(raw, list):
+        return []
+    tags: list[str] = []
+    for item in raw:
+        tag = str(item).strip().strip("[]\"'").strip()
+        # A one-character tag is either debris from a split string or a tag too
+        # short to retrieve anything.
+        if len(tag) > 1 and tag not in tags:
+            tags.append(tag)
+    return tags[:12]
