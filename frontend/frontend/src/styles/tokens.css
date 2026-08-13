@@ -1,0 +1,106 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Design tokens — ported verbatim from
+   `_ds/organic-81e8e890-c05b-4ad8-b993-1727a46b1f81/styles.css`, then retuned
+   into the single Organic palette the app ships (`data-hub-theme='organic'`).
+
+   These are the ONLY hex literals in the app. Everything downstream — Tailwind
+   theme extensions in `tailwind.config.ts` and the component classes in
+   `components.css` — reads them through `var()`.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Organic base */
+  --color-bg: #f5ead8;
+  --color-surface: #ebddc5;
+  --color-text: #201e1d;
+  --color-accent: #c67139;
+  --color-accent-2: #7a8a5e;
+  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+
+  /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
+     same step of any role matches the others in visual value. */
+  --color-neutral-100: #f9f4ed;
+  --color-neutral-200: #eee7db;
+  --color-neutral-300: #dcd3c4;
+  --color-neutral-400: #c0b6a5;
+  --color-neutral-500: #a19786;
+  --color-neutral-600: #82796a;
+  --color-neutral-700: #645c50;
+  --color-neutral-800: #474238;
+  --color-neutral-900: #2e2b25;
+
+  --color-accent-100: #fff2eb;
+  --color-accent-200: #ffe1d0;
+  --color-accent-300: #ffc6a5;
+  --color-accent-400: #f6a06b;
+  --color-accent-500: #d67f48;
+  --color-accent-600: #b2622d;
+  --color-accent-700: #8c491a;
+  --color-accent-800: #643312;
+  --color-accent-900: #402310;
+
+  --color-accent-2-100: #f0fae1;
+  --color-accent-2-200: #e1eecc;
+  --color-accent-2-300: #ccdbb2;
+  --color-accent-2-400: #aebf92;
+  --color-accent-2-500: #8fa073;
+  --color-accent-2-600: #728157;
+  --color-accent-2-700: #56633f;
+  --color-accent-2-800: #3d472b;
+  --color-accent-2-900: #272e1b;
+
+  --font-heading: 'Caprasimo', system-ui, sans-serif;
+  --font-heading-weight: 400;
+  --font-body: 'Figtree', system-ui, sans-serif;
+
+  --space-1: 4.4px;
+  --space-2: 8.8px;
+  --space-3: 13.2px;
+  --space-4: 17.6px;
+  --space-6: 26.4px;
+  --space-8: 35.2px;
+
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 28px;
+
+  /* Elevation — derived from the ground: soft ink-tinted shadows on a
+     light theme, a hairline edge + ambient darkness on a dark one. */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
+
+  /* The prototype's retune of the rounded frame: the base Organic system goes
+     fully pill on small controls, the Hub pulls that back to soft rectangles. */
+  --radius-control: 9px;
+  --radius-tag: 6px;
+  --radius-card: 14px;
+}
+
+/* Subtle retune of the Organic tokens: the sage voice leads, the terracotta
+   ramp is muted to a soft clay so it reads as warmth, not orange. */
+[data-hub-theme='organic'] {
+  --color-bg: #faf6ef;
+  --color-surface: #f0eae0;
+  --color-accent: #7d8a6b;
+  --color-accent-2: #a9826a;
+  --color-accent-100: #f2f4ec;
+  --color-accent-200: #e4e8da;
+  --color-accent-300: #cdd4bf;
+  --color-accent-400: #adb79b;
+  --color-accent-500: #8e9a7c;
+  --color-accent-600: #6e7a5f;
+  --color-accent-700: #535d47;
+  --color-accent-800: #3b4332;
+  --color-accent-900: #272d21;
+  --color-accent-2-100: #f8f1eb;
+  --color-accent-2-200: #eee0d4;
+  --color-accent-2-300: #ddc8b6;
+  --color-accent-2-400: #c6a892;
+  --color-accent-2-500: #ab8a72;
+  --color-accent-2-600: #8d6e59;
+  --color-accent-2-700: #6d5342;
+  --color-accent-2-800: #4e3a2e;
+  --color-accent-2-900: #33261e;
+}
+
