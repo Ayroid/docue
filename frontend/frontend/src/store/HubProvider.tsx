@@ -21,6 +21,8 @@ export interface Upload {
   note: string
   status: string
   kind: string
+  /** The real backend template id, when this row came from an actual `POST /templates` call. */
+  backendId?: string
 }
 
 /** A generation session — the server-side resumable state of §6, held client-side for now. */
@@ -55,7 +57,8 @@ interface HubState {
 
   saveDraft: (sessionId: string) => void
   commitSession: (sessionId: string) => string
-  addUpload: () => void
+  lastUpload: { name: string; fmt: Fmt; meta: string } | null
+  addUpload: (name: string, fmt: Fmt, meta: string, backendId?: string) => void
   publishUpload: (id: number, name: string, fmt: Fmt) => void
 
   toast: string | null
@@ -77,6 +80,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<MyDoc[]>(MYDOCS)
   const [drafts, setDrafts] = useState<Draft[]>(SEED_DRAFTS)
   const [uploads, setUploads] = useState<Upload[]>([])
+  const [lastUpload, setLastUpload] = useState<{ name: string; fmt: Fmt; meta: string } | null>(null)
   const [sessions, setSessions] = useState<Record<string, Session>>({})
   const [toast, setToast] = useState<string | null>(null)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
@@ -163,19 +167,21 @@ export function HubProvider({ children }: { children: ReactNode }) {
     [sessions, updateSession],
   )
 
-  const addUpload = useCallback(() => {
+  const addUpload = useCallback((name: string, fmt: Fmt, meta: string, backendId?: string) => {
     setUploads((prev) => [
       {
         id: 2000 + prev.length,
-        name: 'Vendor Assessment Checklist',
-        fmt: 'DOC',
-        meta: '.docx · 148 KB · submitted just now',
+        name,
+        fmt,
+        meta,
         note: 'Waiting on doc control approval',
         status: 'Awaiting review',
         kind: 'In process',
+        backendId,
       },
       ...prev,
     ])
+    setLastUpload({ name, fmt, meta })
     setUploadDialogOpen(true)
   }, [])
 
@@ -220,6 +226,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
       getSession,
       saveDraft,
       commitSession,
+      lastUpload,
       addUpload,
       publishUpload,
       toast,
@@ -241,6 +248,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
       getSession,
       saveDraft,
       commitSession,
+      lastUpload,
       addUpload,
       publishUpload,
       toast,

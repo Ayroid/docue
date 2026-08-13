@@ -2,16 +2,42 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ACCESS_GROUPS, QUEUE, SUBMISSIONS, SUB_FILTERS, statusClass } from '@/data/mock'
 import { useHub } from '@/store/HubProvider'
+import { getTemplate, TemplateApiError, type TemplateOut } from '@/services/templates'
+import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { FilterTag } from '@/components/ui/tag'
 import { Table, TableCard, Panel, SectionLabel } from '@/components/ui/table'
+import { Dialog } from '@/components/ui/dialog'
 import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
 import { CheckIcon } from '@/components/icons'
+
+interface VerifyState {
+  rowId: number
+  loading: boolean
+  result: TemplateOut | null
+  error: string | null
+}
 
 export function Admin() {
   const { uploads, publishUpload, fireToast } = useHub()
   const navigate = useNavigate()
   const [filter, setFilter] = useState('All')
+  const [verify, setVerify] = useState<VerifyState | null>(null)
+
+  const verifyBackend = async (rowId: number, backendId: string) => {
+    setVerify({ rowId, loading: true, result: null, error: null })
+    try {
+      const result = await getTemplate(backendId)
+      setVerify({ rowId, loading: false, result, error: null })
+    } catch (err) {
+      setVerify({
+        rowId,
+        loading: false,
+        result: null,
+        error: err instanceof TemplateApiError ? err.message : 'Verification failed.',
+      })
+    }
+  }
 
   /* Live uploads from this session lead the queue; the mock submission
      history fills it out so the page never looks empty on first load. */
@@ -86,26 +112,39 @@ export function Admin() {
                           <span className={statusClass(s.status)}>{s.status}</span>
                         </td>
                         <td>
-                          {s.live && s.status !== 'Approved' ? (
-                            <div className="flex gap-2 justify-end">
-                              <Button
-                                variant="primary"
-                                size="xs"
-                                className="whitespace-nowrap"
-                                onClick={() => publishUpload(s.id, s.name, s.fmt)}
-                              >
-                                Approve
-                              </Button>
+                          <div className="flex gap-2 justify-end flex-wrap">
+                            {s.live && s.backendId ? (
                               <Button
                                 variant="secondary"
                                 size="xs"
                                 className="whitespace-nowrap"
-                                onClick={() => fireToast(`Sent ${s.name} back for changes`)}
+                                disabled={verify?.rowId === s.id && verify.loading}
+                                onClick={() => verifyBackend(s.id, s.backendId!)}
                               >
-                                Send back
+                                {verify?.rowId === s.id && verify.loading ? 'Checking…' : 'Verify'}
                               </Button>
-                            </div>
-                          ) : null}
+                            ) : null}
+                            {s.live && s.status !== 'Approved' ? (
+                              <>
+                                <Button
+                                  variant="primary"
+                                  size="xs"
+                                  className="whitespace-nowrap"
+                                  onClick={() => publishUpload(s.id, s.name, s.fmt)}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="xs"
+                                  className="whitespace-nowrap"
+                                  onClick={() => fireToast(`Sent ${s.name} back for changes`)}
+                                >
+                                  Send back
+                                </Button>
+                              </>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -167,6 +206,50 @@ export function Admin() {
           </Button>
         </div>
       </div>
+
+      <Dialog
+        open={verify !== null}
+        onOpenChange={(open) => !open && setVerify(null)}
+        title="Backend record"
+        actions={
+          <Button variant="primary" onClick={() => setVerify(null)}>
+            Done
+          </Button>
+        }
+      >
+        <div className="dialog-body">
+          {verify?.loading ? (
+            <p className="m-0">Checking the server…</p>
+          ) : verify?.error ? (
+            <p className="m-0 text-accent2-700">{verify.error}</p>
+          ) : verify?.result ? (
+            <div className="flex flex-col gap-[10px] text-[13.5px]">
+              <p className="m-0 opacity-70">
+                Re-read directly from <code>GET /templates/{'{id}'}</code> — this confirms the file is genuinely
+                persisted in S3 and Postgres, not just accepted by the browser.
+              </p>
+              {[
+                ['Template ID', verify.result.id],
+                ['Status', verify.result.status],
+                ['Storage key', verify.result.current_version?.storage_key ?? '—'],
+                ['File hash', verify.result.current_version?.file_hash ?? '—'],
+                ['Size', verify.result.current_version ? formatBytes(verify.result.current_version.size_bytes) : '—'],
+                [
+                  'Uploaded',
+                  verify.result.current_version
+                    ? new Date(verify.result.current_version.created_at).toLocaleString()
+                    : '—',
+                ],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-3 border-t border-divider pt-[10px]">
+                  <span className="opacity-60">{label}</span>
+                  <span className="font-semibold text-right break-all">{value}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </Dialog>
     </PageBody>
   )
 }
