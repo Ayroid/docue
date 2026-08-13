@@ -31,6 +31,19 @@ export interface TemplateOut {
   original_filename: string
   format: TemplateFormat
   status: string
+  /** Read off the document itself, e.g. `YMSLI-F-MOM`. */
+  form_id: string | null
+  house_pattern: string | null
+  /* Written by the backend's enrichment pass, not by the uploader. Null until
+     that pass finishes — which is normal for ~45s after upload, and stays null
+     if the model was unavailable. Treat as pending, never as an error. */
+  purpose: string | null
+  when_to_use: string | null
+  audience: string | null
+  category: string | null
+  tags: string[]
+  /** True once the template is embedded and reachable by semantic search. */
+  searchable: boolean
   current_version_id: string
   created_at: string
   updated_at: string
@@ -160,4 +173,135 @@ export async function downloadTemplateFile(id: string): Promise<ArrayBuffer> {
   }
 
   return res.arrayBuffer()
+}
+
+/* ── ingestion progress ─────────────────────────────────────────────────── */
+
+/** The AI half of ingestion: semantic labels, discovery metadata, embedding. */
+export interface EnrichmentOut {
+  enrichment_version: string
+  model_id: string
+  classifier_prompt: string
+  metadata_prompt: string
+  regions_labelled: number
+  /** Regions the model judged a generation agent should not write. */
+  regions_write_refused: number
+  /** False when the model call failed and the filename was used instead. */
+  metadata_generated: boolean
+  /** Whether the template is findable by semantic search. */
+  embedded: boolean
+  title: string | null
+  tags: string[]
+  elapsed_ms: number | null
+  warnings: string[]
+}
+
+export type JobStatusValue = 'queued' | 'running' | 'succeeded' | 'failed'
+
+/**
+ * What `GET /templates/{id}/ingestion/{job_id}` answers with.
+ *
+ * Two things are easy to get wrong here, and both come from how the backend is
+ * built rather than from taste:
+ *
+ * - `enrichment` is null on a *succeeded* job whenever the model was
+ *   unavailable. Enrichment runs after the structural result is committed and
+ *   is not allowed to fail it, so that combination means "not searchable yet",
+ *   not "broken". Render it as pending.
+ * - A *failed* job still leaves a downloadable template: the file and the
+ *   version row are committed before the job starts.
+ */
+export interface JobStatus {
+  job_id: string
+  kind: string
+  status: JobStatusValue
+  /** fingerprint | detect | harvest | verify | persist | enrich | done */
+  stage: string | null
+  /** 0-100. Safe to drive a progress bar from the first response. */
+  progress: number
+  error: string | null
+  pipeline_version: string | null
+  detector_version: string | null
+  regions_detected: number | null
+  regions_writable: number | null
+  counts_by_kind: Record<string, number> | null
+  containers: string[] | null
+  house_pattern_matched: string | null
+  form_id: string | null
+  in_doc_version: string | null
+  enrichment: EnrichmentOut | null
+  warnings: string[]
+  elapsed_ms: number | null
+}
+
+export async function getIngestionStatus(templateId: string, jobId: string): Promise<JobStatus> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/templates/${templateId}/ingestion/${jobId}`)
+  } catch {
+    throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
+  }
+
+  if (!res.ok) {
+    throw new TemplateApiError(res.status, (await detailOf(res)) ?? `Job lookup failed (${res.status}).`)
+  }
+
+  return res.json()
+}
+
+/* ── search ─────────────────────────────────────────────────────────────── */
+
+export interface SignalScores {
+  bm25_rank: number | null
+  vector_rank: number | null
+  bm25: number | null
+  vector: number | null
+  rrf: number
+}
+
+export interface SearchResult {
+  template_id: string
+  title: string
+  format: TemplateFormat
+  purpose: string | null
+  when_to_use: string | null
+  audience: string | null
+  tags: string[]
+  form_id: string | null
+  current_version_id: string | null
+  score: number
+  /** Derived from the ranks by the backend, never written by a model — safe to show verbatim. */
+  match_explanation: string
+  /** Fragments with <mark> around matched terms. Render as HTML, sanitised to <mark>. */
+  highlights: string[]
+  scores: SignalScores
+}
+
+export interface SearchResponse {
+  query: string
+  results: SearchResult[]
+  latency_ms: number
+  lexical_candidates: number
+  vector_candidates: number
+  /** Set when the query could not be embedded — results are keyword-only. */
+  degraded: string | null
+}
+
+export async function searchTemplates(query: string, topK = 5): Promise<SearchResponse> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, top_k: topK }),
+    })
+  } catch {
+    throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
+  }
+
+  if (!res.ok) {
+    throw new TemplateApiError(res.status, (await detailOf(res)) ?? `Search failed (${res.status}).`)
+  }
+
+  return res.json()
 }
