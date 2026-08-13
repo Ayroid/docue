@@ -110,6 +110,8 @@ _LABEL_VALUE_RE = re.compile(r"^([^:\n]{1,60}:[ \t]*)(.*)$", re.DOTALL)
 _DATE_RE = re.compile(r"^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$")
 _NUMBER_RE = re.compile(r"^-?\d+(\.\d+)?$")
 _EXPORT_MARKER_RE = re.compile(r"Export to Word/PDF|Azure Extension", re.IGNORECASE)
+# `Items (9) Summary:` -- a caption that restates its table's row count.
+_CAPTION_COUNT_RE = re.compile(r"\((\d+)\)")
 
 # kind -> (editable, protected). Identical mapping to the xlsx detector's, and
 # for the same reason: `protected` is what the compiler pre-flight refuses to
@@ -655,6 +657,7 @@ class _DocxDetector:
 
             caption = self._caption_above(position.after_para_index)
             label = None
+            id_hint = None
             if caption is not None:
                 self._claim(caption.index)
                 # Trailing colon dropped so `Items (9) Summary:` and
@@ -665,6 +668,23 @@ class _DocxDetector:
                 # not a write target -- so it is recorded rather than left
                 # looking like an unclassified paragraph.
                 notes["caption_para"] = caption.index
+                template = self._caption_count_template(caption.text, populated)
+                if template is not None:
+                    # `Items (9) Summary:` restates the row count, so it is a
+                    # derived value rather than a name -- and Word has no
+                    # formulas, so nothing recalculates it. The compiler puts
+                    # the count back after it changes this table; without that
+                    # the document ships claiming nine items above eleven rows.
+                    notes["caption_count_template"] = template
+                    notes["caption_counted_rows"] = populated
+                    # The count is data, so it must not be part of the region's
+                    # *identity*. The label still shows the caption verbatim,
+                    # but the id is built from the count-free form: otherwise
+                    # refreshing the caption renames the region from
+                    # `doc.items_9_summary` to `doc.items_11_summary`, and every
+                    # id recorded against the previous version stops resolving
+                    # the moment a row is added.
+                    id_hint = template.format(count="").rstrip().rstrip(":").strip()
             if not label:
                 label = f"table {position.table_index}"
 
@@ -681,9 +701,24 @@ class _DocxDetector:
                 ),
                 label=label,
                 value_type="mixed",
-                id_hint=label,
+                id_hint=id_hint or label,
                 notes=notes,
             )
+
+    @staticmethod
+    def _caption_count_template(caption: str, populated: int) -> str | None:
+        """`Items (9) Summary:` -> `Items ({count}) Summary:`, if the 9 is the count.
+
+        Only a number that already agrees with the table is treated as derived.
+        A caption like `Annexure (A) Summary` keeps its parenthesis untouched,
+        and so does one whose number happens to be something else -- guessing
+        would be worse than leaving it alone, because rewriting it would destroy
+        real text rather than merely let a count go stale.
+        """
+        match = _CAPTION_COUNT_RE.search(caption)
+        if match is None or int(match.group(1)) != populated:
+            return None
+        return caption[: match.start(1)] + "{count}" + caption[match.end(1) :]
 
     @staticmethod
     def _template_row(cells_per_row: list[int]) -> int:

@@ -374,8 +374,30 @@ def check_brd(schema: DocumentSchema, data: bytes) -> list[str]:
 
     # The work-item table.
     tables = by_kind.get("table_data", [])
-    if not any(r.notes.get("row_count") == 9 for r in tables):
+    work_items = next((r for r in tables if r.notes.get("row_count") == 9), None)
+    if work_items is None:
         failures.append(f"the 9-row work-item table was not detected: {[r.notes.get('row_count') for r in tables]}")
+    else:
+        # `Items (9) Summary:` restates the row count. Word recalculates
+        # nothing, so the detector has to hand the compiler a template or the
+        # derived document ships claiming nine items above eleven rows.
+        if work_items.notes.get("caption_count_template") != "Items ({count}) Summary:":
+            failures.append(
+                "the counting caption was not templated: "
+                f"{work_items.notes.get('caption_count_template')!r}"
+            )
+        if work_items.notes.get("caption_counted_rows") != 9:
+            failures.append(
+                f"caption_counted_rows={work_items.notes.get('caption_counted_rows')}, want 9"
+            )
+        # The count is not part of the identity: a derive that appends rows
+        # restates the caption, and an id carrying the old number would stop
+        # resolving the moment it did.
+        if work_items.region_id != "doc.items_summary":
+            failures.append(
+                f"counting caption's region_id is {work_items.region_id!r}, "
+                "want 'doc.items_summary' (count-free)"
+            )
 
     # Fields.
     fields = {r.label: r for r in by_kind.get("field", [])}
@@ -484,6 +506,61 @@ def check_synthetic() -> list[str]:
     return failures
 
 
+def check_caption_negatives() -> list[str]:
+    """A parenthesis in a caption is only a count when it already agrees.
+
+    The BRD has one counting caption and no counter-examples, so the two ways of
+    getting this wrong are synthesised. Rewriting a parenthesis that turns out
+    to be an annexure letter, or a number that means something other than the
+    row count, would destroy real text -- strictly worse than the stale count
+    the template exists to prevent. So the rule is: template it only if the
+    printed number is already the number of populated rows.
+    """
+    failures: list[str] = []
+
+    def _schema_for(caption: str, data_rows: int):
+        document = docx.Document()
+        document.add_paragraph(caption)
+        table = document.add_table(rows=1 + data_rows, cols=2)
+        for cell, name in zip(table.rows[0].cells, ("Item", "Name")):
+            cell.text = name
+        for index in range(data_rows):
+            row = table.rows[1 + index]
+            row.cells[0].text = str(index + 1)
+            row.cells[1].text = f"row {index + 1}"
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return detect_regions_docx(buffer.getvalue())
+
+    for caption, data_rows, why in (
+        ("Annexure (A) Summary:", 2, "a letter, not a count"),
+        ("Items (3) Summary:", 2, "a number that disagrees with the table"),
+    ):
+        schema = _schema_for(caption, data_rows)
+        templated = [
+            r for r in schema.regions if r.notes.get("caption_count_template") is not None
+        ]
+        if templated:
+            failures.append(
+                f"{caption!r} ({why}) was templated as "
+                f"{templated[0].notes['caption_count_template']!r}"
+            )
+
+    # And the positive control on the same synthetic shape, so a rule that
+    # simply never fires can't pass the two negatives above.
+    schema = _schema_for("Items (2) Summary:", 2)
+    templated = [
+        r for r in schema.regions if r.notes.get("caption_count_template") is not None
+    ]
+    if not templated:
+        failures.append("'Items (2) Summary:' over 2 rows was not templated")
+    elif templated[0].notes["caption_count_template"] != "Items ({count}) Summary:":
+        failures.append(
+            f"template built wrong: {templated[0].notes['caption_count_template']!r}"
+        )
+    return failures
+
+
 def main() -> int:
     path = FILES_DIR / SAMPLE
     if not path.exists():
@@ -513,6 +590,7 @@ def main() -> int:
 
     failures = [f"BRD: {f}" for f in check_brd(schema, data)]
     failures += [f"synthetic: {f}" for f in check_synthetic()]
+    failures += [f"caption: {f}" for f in check_caption_negatives()]
     if recall < RECALL_TARGET:
         failures.append(
             f"recall {recall:.1%} is below the plan's {RECALL_TARGET:.0%} target"
