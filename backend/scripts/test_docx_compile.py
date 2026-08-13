@@ -10,7 +10,9 @@ and never by a hand-typed paragraph index:
     below it down by two
   * a list block **shrunk** from 8 items to 3, which pulls everything below it
     up by five
-  * two rows appended to the work-item table
+  * two rows appended to the work-item table, whose caption `Items (9) Summary:`
+    is restated to match -- Word has no formulas, so the compiler is what
+    recalculates it
   * one row appended to the in-document revision block -- plan §1.3's
     write-back, so the version history travels with the file
 
@@ -53,8 +55,13 @@ OUTPUT_PATH = Path(__file__).resolve().parent.parent / "scratch" / "BRD_T3_deriv
 PREPARED_BY = "doc.prepared_by"
 GROWN_BLOCK = "doc.description"  # paras 83-85, 3 prose items
 SHRUNK_BLOCK = "doc.acceptance_criteria_4"  # paras 227-234, 8 numbered items
-WORK_ITEMS = "doc.items_9_summary"  # table 1, 9 data rows
+# `Items (9) Summary:` -> `doc.items_summary`, not `doc.items_9_summary`: the
+# count is dropped from the id so that refreshing the caption doesn't rename the
+# region out from under a spec written against the previous version.
+WORK_ITEMS = "doc.items_summary"  # table 1, 9 data rows
 REVISION_BLOCK = "doc.document_revision"  # table 0, the house pattern
+
+CAPTION_PARA = 77  # `Items (9) Summary:` -- the caption over the work-item table
 
 DESCRIPTION_ITEMS = [
     "As a Financial Accounting SME, I want capital acquisition requests captured "
@@ -209,6 +216,22 @@ def check_guarantees(schema, original: bytes) -> list[str]:
             if "template_row" not in str(exc):
                 failures.append(f"short-row error should point at template_row: {exc}")
 
+    # A caption is only restated when its own table moved. Rewriting one over an
+    # untouched table could only ever put the same number back, and it would add
+    # an assertion about a paragraph this spec never claimed to write.
+    untouched = dc.compile_change_spec(
+        original,
+        [dc.set_field(schema, PREPARED_BY, "YMSLI Digital Transformation Office")],
+        protected=protected,
+        derived=dc.derived_captions_from_schema(schema),
+    )
+    if untouched.captions_refreshed:
+        failures.append(
+            f"a spec touching no table refreshed {untouched.captions_refreshed}"
+        )
+    if any(a.para_index == CAPTION_PARA for a in untouched.assertions):
+        failures.append(f"spurious assertion on the untouched caption at para {CAPTION_PARA}")
+
     return failures
 
 
@@ -262,14 +285,40 @@ def check_output_geometry(schema, data: bytes) -> list[str]:
         )
 
     # The work-item table gained two rows and reads as a populated table.
+    expected_rows = 9 + len(WORK_ITEM_ROWS)
     work_items = output.by_id(WORK_ITEMS)
     if work_items is None:
         failures.append(f"{WORK_ITEMS} no longer detected")
-    elif work_items.notes["row_count"] != 9 + len(WORK_ITEM_ROWS):
-        failures.append(
-            f"work-item table row_count={work_items.notes['row_count']}, "
-            f"want {9 + len(WORK_ITEM_ROWS)}"
-        )
+    else:
+        if work_items.notes["row_count"] != expected_rows:
+            failures.append(
+                f"work-item table row_count={work_items.notes['row_count']}, "
+                f"want {expected_rows}"
+            )
+        # The pairing the defect was about: the caption is a fact about the
+        # table, so a detector reading the *output* must find the two agreeing.
+        # `caption_counted_rows` comes from counting the rows; the printed
+        # number comes from the compiler -- if they match, the caption is not
+        # stale, and the template is still recorded, so the next derive can
+        # restate it again.
+        counted = work_items.notes.get("caption_counted_rows")
+        if counted != expected_rows:
+            failures.append(
+                f"re-detected caption counts {counted} rows, want {expected_rows} "
+                f"-- the caption is stale"
+            )
+        if work_items.notes.get("caption_count_template") != "Items ({count}) Summary:":
+            failures.append(
+                "the refreshed caption no longer reads as a counting caption: "
+                f"{work_items.notes.get('caption_count_template')!r}"
+            )
+        caption_para = work_items.notes.get("caption_para")
+        caption_text = document.paragraphs[caption_para].text if caption_para is not None else None
+        if caption_text != f"Items ({expected_rows}) Summary:":
+            failures.append(
+                f"caption in the output reads {caption_text!r}, "
+                f"want 'Items ({expected_rows}) Summary:'"
+            )
 
     # The revision block now declares Ver. 2.0 -- read back out of the document.
     revision = output.by_id(REVISION_BLOCK)
@@ -344,8 +393,12 @@ def main() -> int:
     failures = check_guarantees(schema, original)
 
     spec = build_spec(schema)
+    captions = dc.derived_captions_from_schema(schema)
     result = dc.compile_change_spec(
-        original, spec, protected=dc.protected_targets_from_schema(schema)
+        original,
+        spec,
+        protected=dc.protected_targets_from_schema(schema),
+        derived=captions,
     )
     after = fingerprint_docx(result.data)
     print(
@@ -354,6 +407,16 @@ def main() -> int:
         f"inserted, {result.paragraphs_removed} removed, "
         f"{len(result.assertions)} assertions, packaging={result.packaging}"
     )
+
+    # The caption states a fact about the table, and the table just grew.
+    expected_caption = f"Items ({9 + len(WORK_ITEM_ROWS)}) Summary:"
+    if not captions:
+        failures.append("no counting caption lifted out of the schema")
+    if result.captions_refreshed != [expected_caption]:
+        failures.append(
+            f"captions refreshed {result.captions_refreshed}, want [{expected_caption!r}]"
+        )
+    print(f"captions:  {result.captions_refreshed} (restated after the rows landed)")
 
     # Derived independently of the compiler: +2 paragraphs from growing the
     # description block 3->5, -5 from shrinking acceptance criteria 8->3,
@@ -404,6 +467,7 @@ def main() -> int:
             original,
             build_spec(schema),
             protected=dc.protected_targets_from_schema(schema),
+            derived=captions,
             repackage=False,
         )
         diff_docx_fingerprints(
@@ -428,6 +492,7 @@ def main() -> int:
     output = docx.Document(io.BytesIO(result.data))
     for label, index in (
         ("prepared by (label kept)", 16),
+        ("items caption (restated)", CAPTION_PARA),
         ("description item 1 (rewritten)", 83),
         ("description item 5 (inserted)", 87),
     ):

@@ -73,6 +73,7 @@ __all__ = [
     "ClearRegionOp",
     "CompileResult",
     "CompilerError",
+    "DerivedCaption",
     "DocxAssertion",
     "Operation",
     "ProtectOp",
@@ -88,6 +89,7 @@ __all__ = [
     "clear_region",
     "compile_change_spec",
     "apply_change_spec",
+    "derived_captions_from_schema",
     "preflight_docx",
     "protected_targets_from_schema",
     "replace_region_rows",
@@ -226,6 +228,7 @@ class CompileResult:
     operations_applied: int
     assertions: list[DocxAssertion]
     packaging: str  # "surgical" | "library"
+    captions_refreshed: list[str] = field(default_factory=list)
 
     @property
     def expected_delta(self) -> Any:
@@ -275,6 +278,53 @@ class ProtectedTarget:
 
     def describe(self) -> str:
         return f"{self.region_id or self.reason or 'protected'}"
+
+
+@dataclass(frozen=True)
+class DerivedCaption:
+    """A caption whose number restates a table's row count.
+
+    `Items (9) Summary:` is a fact about the table beneath it, not a name for
+    it. Excel recalculates its `derived` regions itself, which is why the xlsx
+    compiler only has to refuse to *write* formulas; Word has no formulas, so
+    here the compiler has to restate the count or the document ships wrong.
+
+    Not reachable through the region bridge, for the same reason
+    `append_history_row` is a separate door: this is the system rewriting its
+    own bookkeeping, never the LLM supplying a value.
+    """
+
+    para_index: int
+    table_index: int
+    count_template: str  # "Items ({count}) Summary:"
+    first_data_row: int = 1
+    region_id: str | None = None
+
+
+def derived_captions_from_schema(schema: object) -> list[DerivedCaption]:
+    """Lift every counting caption out of a docx `DocumentSchema`.
+
+    Typed loosely, exactly like `protected_targets_from_schema`: this and that
+    function are the only places the compiler and the ingestion layer meet.
+    """
+    captions: list[DerivedCaption] = []
+    for region in getattr(schema, "regions", []):
+        notes = getattr(region, "notes", {}) or {}
+        template = notes.get("caption_count_template")
+        caption_para = notes.get("caption_para")
+        table_index = getattr(region.locator, "table_index", None)
+        if not template or caption_para is None or table_index is None:
+            continue
+        captions.append(
+            DerivedCaption(
+                para_index=caption_para,
+                table_index=table_index,
+                count_template=template,
+                first_data_row=notes.get("first_data_row", 1),
+                region_id=getattr(region, "region_id", None),
+            )
+        )
+    return captions
 
 
 def protected_targets_from_schema(schema: object) -> list[ProtectedTarget]:
@@ -481,6 +531,29 @@ class _DocumentEditor:
                 f"({len(rows)} rows)"
             )
         return rows[row_index]
+
+    def count_populated_rows(self, table_index: int, first_data_row: int) -> int:
+        """Data rows with text, read from the document *as it stands now*.
+
+        Deliberately not `self.original_rows`, which is the pre-edit snapshot:
+        this is asked after the structural pass so it has to see the rows that
+        were just cloned. `row.cells` rather than `table.cell(r, c)`, because
+        the revision block declares nine grid columns and carries five `<w:tc>`
+        in its populated row -- flat indexing there returns the next row's cell.
+
+        Counting stops at the first blank row, which is the detector's rule and
+        not a choice made here: `regions_docx.py` reads trailing blanks as spare
+        slots rather than data. If the two rules diverged, re-detecting the
+        output would report a `row_count` that contradicts the caption the
+        compiler had just written above it.
+        """
+        table = self._table(table_index)
+        populated = 0
+        for row in list(table.rows)[first_data_row:]:
+            if not any(cell.text.strip() for cell in row.cells):
+                break
+            populated += 1
+        return populated
 
     # -- writes --------------------------------------------------------
 
@@ -870,6 +943,7 @@ def compile_change_spec(
     operations: list[Operation],
     *,
     protected: list[ProtectedTarget] | None = None,
+    derived: list[DerivedCaption] | None = None,
     repackage: bool = True,
 ) -> CompileResult:
     """Apply a Change Spec to a docx and report what it did.
@@ -878,6 +952,10 @@ def compile_change_spec(
     `ProtectOp` in the spec itself: the pre-flight runs before a single byte is
     touched, so a spec that would write over an image fails without producing a
     file at all.
+
+    `derived` captions (also from the schema) are restated *after* the spec has
+    been applied, because their value is a fact about the finished document
+    rather than one the caller can know up front.
     """
     editor = _DocumentEditor(original_bytes)
 
@@ -934,6 +1012,22 @@ def compile_change_spec(
         removal_ops,
     )
 
+    # Last, because a count is only knowable once every row has landed.
+    captions_refreshed = _refresh_captions(
+        editor,
+        derived or [],
+        # Clears count as touching the table: a `replace_region_rows` down to
+        # nothing, and any bare `clear_region`, expand to a `ClearRegionOp`
+        # alone -- the row count drops and the caption above it would be left
+        # stating the old one, which is the exact defect this refresh exists
+        # to close.
+        touched_tables={op.table_index for op in row_value_ops + insert_ops}
+        | {op.table_index for op in clear_ops if op.table_index is not None},
+        assertions=assertions,
+        block_ops=block_ops,
+        removal_ops=removal_ops,
+    )
+
     data, packaging = editor.render(repackage=repackage)
     result = CompileResult(
         data=data,
@@ -948,9 +1042,50 @@ def compile_change_spec(
         + len(removal_ops),
         assertions=assertions,
         packaging=packaging,
+        captions_refreshed=captions_refreshed,
     )
     result._cells_inserted = editor.cells_inserted
     return result
+
+
+def _refresh_captions(
+    editor: "_DocumentEditor",
+    derived: list[DerivedCaption],
+    *,
+    touched_tables: set[int],
+    assertions: list[DocxAssertion],
+    block_ops: list[_CloneParagraphsOp],
+    removal_ops: list[_RemoveParagraphsOp],
+) -> list[str]:
+    """Restate every counting caption whose table this spec changed.
+
+    Only tables the spec actually touched are visited: rewriting a caption over
+    an untouched table could only ever turn a correct number into the same
+    number, and doing it anyway would put a spurious assertion in the result.
+    """
+    refreshed: list[str] = []
+    for caption in derived:
+        if caption.table_index not in touched_tables:
+            continue
+        count = editor.count_populated_rows(caption.table_index, caption.first_data_row)
+        text = caption.count_template.format(count=count)
+        # By original coordinates: the editor caches paragraph objects, so an
+        # original index still resolves to the right element after the
+        # structural pass has moved it.
+        #
+        # Written straight through the editor, around `preflight_docx`, for the
+        # same reason `append_history_row` goes around `Region.editable`: this
+        # is the system restating its own bookkeeping, never the model supplying
+        # a value. `_guard_writable` still refuses a caption whose text sits
+        # inside a hyperlink, and it raises before `render()`, so a refusal
+        # produces no file rather than a half-written one.
+        editor.set_text(SetTextOp(para_index=caption.para_index, text=text))
+        final = caption.para_index + _paragraph_shift(
+            caption.para_index, block_ops, removal_ops, exclude=None
+        )
+        assertions.append(DocxAssertion(expected=text, para_index=final))
+        refreshed.append(text)
+    return refreshed
 
 
 def _paragraph_shift(
@@ -1058,9 +1193,22 @@ def _assertions(
     return assertions
 
 
-def apply_change_spec(original_bytes: bytes, operations: list[Operation]) -> bytes:
-    """Compile a spec and return just the bytes."""
-    return compile_change_spec(original_bytes, operations).data
+def apply_change_spec(
+    original_bytes: bytes,
+    operations: list[Operation],
+    *,
+    protected: list[ProtectedTarget] | None = None,
+    derived: list[DerivedCaption] | None = None,
+) -> bytes:
+    """Compile a spec and return just the bytes.
+
+    Both schema-derived lists are forwarded rather than dropped: a caller that
+    reaches for the one-line helper should not silently lose the protection
+    pre-flight or leave a counting caption stating the old number.
+    """
+    return compile_change_spec(
+        original_bytes, operations, protected=protected, derived=derived
+    ).data
 
 
 # ── region_id bridge ──────────────────────────────────────────────────────
