@@ -1,4 +1,4 @@
-import { PREVIEW_LINES } from '@/data/mock'
+import { PREVIEW_LINES } from '@/data/demo'
 import { Tag } from '@/components/ui/tag'
 import { PreviewLines } from '@/components/common'
 import type { LivePreview } from './useLivePreview'
@@ -126,14 +126,15 @@ export function LivePreviewPanel({
       </div>
 
       <div className="mt-[9px] flex flex-col gap-[9px]">
-        {showAccurateRender ? (
+        {/* The simulated renderer hands back a `render://` URL with no bytes
+            behind it, so asking the browser for it only produces a failed
+            request in the console. Skip it and leave the skeleton standing;
+            a real render endpoint returning an http(s) URL still displays. */}
+        {showAccurateRender && !render!.pngUrl.startsWith('render://') ? (
           <img
             src={render!.pngUrl}
             alt={`Rendered preview of ${original.title}`}
             className="w-full rounded-[8px] bg-neutral-200"
-            /* The simulated renderer returns a `render://` URL with no bytes
-               behind it. Falling back to the skeleton keeps the swap visible
-               without shipping a broken image. */
             onError={(e) => {
               e.currentTarget.style.display = 'none'
             }}

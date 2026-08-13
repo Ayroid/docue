@@ -1,11 +1,12 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { statusClass, VERSIONS } from '@/data/mock'
+import { statusClass } from '@/data/catalog'
+import { VERSIONS } from '@/data/demo'
 import { useHub } from '@/store/HubProvider'
 import { initialsOf } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
-import { Avatar, EmptyState, FormatChip, PageBody, PreviewLines } from '@/components/common'
+import { Avatar, DemoBadge, EmptyState, FormatChip, PageBody, PreviewLines } from '@/components/common'
 import { DownloadIcon, GenerateIcon } from '@/components/icons'
 
 export function GeneratedDocument() {
@@ -39,7 +40,10 @@ export function GeneratedDocument() {
             {doc.template} · v{doc.version} · {doc.size} · created {doc.created}
           </p>
         </div>
-        <span className={`${statusClass(doc.status)} whitespace-nowrap ml-auto`}>{doc.status}</span>
+        <div className="ml-auto flex items-center gap-2 flex-none">
+          <DemoBadge />
+          <span className={`${statusClass(doc.status)} whitespace-nowrap`}>{doc.status}</span>
+        </div>
       </div>
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">

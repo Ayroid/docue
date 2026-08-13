@@ -1,14 +1,15 @@
 import { useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { QA_CHECKS, REVIEW_ROWS } from '@/data/mock'
+import { QA_CHECKS, REVIEW_ROWS } from '@/data/demo'
 import { useHub } from '@/store/HubProvider'
 import { buildChangeSpec, parseTemplate } from '@/features/generate/session'
+import { useDemoTemplate } from '@/features/generate/useDemoTemplate'
 import { applySpec } from '@/features/preview/workingCopy'
 import type { ProvenanceKind } from '@/features/preview/types'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
-import { EmptyState, PageBody, PageHeading } from '@/components/common'
+import { DemoBadge, EmptyState, PageBody, PageHeading } from '@/components/common'
 import { CheckIcon } from '@/components/icons'
 
 const PROV_LABEL: Record<ProvenanceKind, string> = {
@@ -34,19 +35,19 @@ const confidenceFor = (label: string) => REVIEW_ROWS.find((r) => r.label === lab
 export function Review() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { templates, getSession, commitSession } = useHub()
+  const { getSession, commitSession } = useHub()
 
   const session = sessionId ? getSession(sessionId) : undefined
-  const template = templates.find((t) => t.id === session?.templateId)
+  const template = useDemoTemplate(session?.templateId)
 
-  const original = useMemo(() => (template ? parseTemplate(template) : null), [template])
+  const original = useMemo(() => parseTemplate(template), [template])
   const spec = useMemo(
-    () => (template && session ? buildChangeSpec(template, session.answers, session.tier, session.qIndex) : null),
+    () => (session ? buildChangeSpec(template, session.answers, session.tier, session.qIndex) : null),
     [template, session],
   )
   const working = useMemo(() => (original && spec ? applySpec(original, spec) : null), [original, spec])
 
-  if (!session || !template || !original || !working) {
+  if (!session || !working) {
     return (
       <PageBody>
         <EmptyState
@@ -65,16 +66,20 @@ export function Review() {
   const changedCount = fields.filter((r) => r.changed).length
 
   const handleCommit = () => {
-    const docId = commitSession(sessionId!)
+    const docId = commitSession(sessionId!, template.name, template.version, template.fmt)
     navigate(`/documents/${docId}`)
   }
 
   return (
     <PageBody>
-      <PageHeading
-        title="Review & commit"
-        subtitle="Check what changed and where it came from before the document is created."
-      />
+      <div className="flex items-start gap-3 flex-wrap mb-[22px]">
+        <PageHeading
+          title="Review & commit"
+          subtitle="Check what changed and where it came from before the document is created."
+          className="mb-0"
+        />
+        <DemoBadge className="mt-[10px]" />
+      </div>
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
         <div className="flex flex-col gap-5 min-w-0">
