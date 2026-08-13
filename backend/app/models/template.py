@@ -20,6 +20,13 @@ class Template(Base):
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     format: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active", index=True)
+    # Both harvested during ingestion from what detection already finds and used
+    # to throw away. `form_id` is YMSLI's own identifier, read off the document
+    # ("YMSLI-F-MOM"), which is the strongest BM25 term the corpus has.
+    # `house_pattern` records that the file follows the Cover/History/
+    # Instruction shape, which is what makes the revision block trustworthy.
+    form_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    house_pattern: Mapped[str | None] = mapped_column(String(50), nullable=True)
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("template_versions.id", use_alter=True, name="fk_templates_current_version"), nullable=True
     )
