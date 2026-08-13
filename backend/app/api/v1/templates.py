@@ -23,9 +23,10 @@ MIME_TYPES = {
 }
 # xlsx/docx/pptx are all zip containers; a valid file must start with the zip local-file-header signature
 ZIP_MAGIC = b"PK\x03\x04"
+MAX_PAGE_SIZE = 100
 
 
-def _to_template_out(template: Template, version: TemplateVersion) -> TemplateOut:
+def _to_template_out(template: Template, version: TemplateVersion | None) -> TemplateOut:
     return TemplateOut(
         id=template.id,
         title=template.title,
@@ -35,7 +36,7 @@ def _to_template_out(template: Template, version: TemplateVersion) -> TemplateOu
         current_version_id=template.current_version_id,
         created_at=template.created_at,
         updated_at=template.updated_at,
-        current_version=TemplateVersionOut.model_validate(version),
+        current_version=TemplateVersionOut.model_validate(version) if version is not None else None,
     )
 
 
@@ -117,6 +118,42 @@ async def upload_template(file: UploadFile = File(...), db: Session = Depends(ge
     db.refresh(template)
     db.refresh(version)
     return _to_template_out(template, version)
+
+
+@router.get("", response_model=list[TemplateOut])
+def list_templates(
+    page: int = 1,
+    page_size: int = 20,
+    format: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[TemplateOut]:
+    if page < 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="page must be >= 1.")
+    if not (1 <= page_size <= MAX_PAGE_SIZE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"page_size must be between 1 and {MAX_PAGE_SIZE}.",
+        )
+    if format is not None and format not in MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported format filter '{format}'. Use one of {sorted(MIME_TYPES)}.",
+        )
+
+    query = db.query(Template).filter(Template.status == "active")
+    if format is not None:
+        query = query.filter(Template.format == format)
+    templates = (
+        query.order_by(Template.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    )
+
+    version_ids = [t.current_version_id for t in templates if t.current_version_id is not None]
+    versions_by_id = {}
+    if version_ids:
+        versions = db.query(TemplateVersion).filter(TemplateVersion.id.in_(version_ids)).all()
+        versions_by_id = {v.id: v for v in versions}
+
+    return [_to_template_out(t, versions_by_id.get(t.current_version_id)) for t in templates]
 
 
 @router.get("/{template_id}", response_model=TemplateOut)
