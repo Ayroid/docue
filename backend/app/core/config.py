@@ -20,10 +20,18 @@ class Settings(BaseSettings):
     bedrock_region: str | None = None
     bedrock_access_key_id: str | None = None
     bedrock_secret_access_key: str | None = None
-    # The `us.` prefix is a cross-region inference profile, not a typo: the
-    # current models refuse a bare `anthropic.claude-*` id with "Invocation
-    # with on-demand throughput isn't supported".
-    bedrock_model_id: str = "us.anthropic.claude-opus-5"
+    # The `us.` prefix is a cross-region inference profile, not a typo: a bare
+    # `anthropic.claude-sonnet-5` is refused with "Invocation with on-demand
+    # throughput isn't supported. Retry with the ID or ARN of an inference
+    # profile." Sonnet 5 because it is what this account allows -- which is
+    # also what plan §10 named for stages ① and ②.
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-5"
+    # Cohere rather than Titan: it is the embedding model this account allows.
+    # 1024 dimensions to match `templates.embedding VECTOR(1024)` in plan §8 --
+    # v4 is Matryoshka-trained, so 1024 is a supported output width and not a
+    # truncation.
+    bedrock_embedding_model_id: str = "cohere.embed-v4:0"
+    embedding_dimensions: int = 1024
     bedrock_timeout_seconds: float = 120.0
     bedrock_max_retries: int = 3
 
