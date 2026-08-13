@@ -932,6 +932,15 @@ class _SheetDetector:
             )
 
 
+def sheet_part_map(data: bytes) -> dict[str, str]:
+    """Sheet name -> worksheet part path, e.g. `Sheet1` -> `xl/worksheets/sheet1.xml`.
+
+    The mapping goes through `xl/_rels/workbook.xml.rels`; sheet order and part
+    numbering don't have to agree, and in BFL they don't.
+    """
+    return {parts.name: parts.sheet_file for parts in _read_sheet_parts(data)}
+
+
 def detect_regions_xlsx(data: bytes) -> DocumentSchema:
     """Classify every populated region of an xlsx workbook, structurally.
 
