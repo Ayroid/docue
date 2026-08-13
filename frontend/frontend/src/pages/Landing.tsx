@@ -26,10 +26,10 @@ const STEPS = [
 ]
 
 const CATEGORIES = [
-  { kicker: 'Functional', title: 'Minutes of Meeting', body: 'Client, internal and steering-committee formats.', meta: '14 templates' },
-  { kicker: 'Functional', title: 'Plans & proposals', body: 'Estimation sheets, SOWs and delivery plans.', meta: '26 templates' },
-  { kicker: 'Technical', title: 'Design documents', body: 'HLD, LLD, integration and architecture notes.', meta: '31 templates' },
-  { kicker: 'Technical', title: 'Test scripts & API specs', body: 'Test cases, UAT sign-off and API contracts.', meta: '57 templates' },
+  { kicker: 'Functional', title: 'Minutes of Meeting', body: 'Client, internal and steering-committee formats.' },
+  { kicker: 'Functional', title: 'Plans & proposals', body: 'Estimation sheets, SOWs and delivery plans.' },
+  { kicker: 'Technical', title: 'Design documents', body: 'HLD, LLD, integration and architecture notes.' },
+  { kicker: 'Technical', title: 'Test scripts & API specs', body: 'Test cases, UAT sign-off and API contracts.' },
 ]
 
 const WHY_POINTS = [
@@ -154,7 +154,6 @@ export function Landing() {
               <span className="card-kicker">{c.kicker}</span>
               <div className="card-title">{c.title}</div>
               <p className="card-body">{c.body}</p>
-              <div className="card-meta">{c.meta}</div>
             </div>
           ))}
         </div>

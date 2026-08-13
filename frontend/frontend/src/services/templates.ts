@@ -1,10 +1,15 @@
 /**
- * Client for the real `/api/v1/templates` endpoints. Upload, list and
- * fetch-by-id are the only routes that exist on the backend today; search,
- * versions, download and delete aren't built yet.
+ * Client for the real `/api/v1/templates` endpoints. Upload, list,
+ * fetch-by-id and download are the routes that exist on the backend today;
+ * search, versions and delete aren't built yet.
  */
 
-const API_BASE_URL = 'http://localhost:8000/api/v1'
+/* Relative on purpose: Vite proxies `/api` to the backend (see `vite.config.ts`),
+   so every call is same-origin and CORS never enters the picture. Naming the
+   backend origin directly here makes each call cross-origin, and the backend's
+   `.env` only allows a couple of fixed ports — the dev server isn't one of them,
+   so those requests get silently blocked. */
+const API_BASE_URL = '/api/v1'
 
 export type TemplateFormat = 'xlsx' | 'docx' | 'pptx'
 
@@ -109,4 +114,23 @@ export async function getTemplate(id: string): Promise<TemplateOut> {
   }
 
   return res.json()
+}
+
+/** Raw file bytes for client-side preview — parsed and rendered entirely in
+    the browser, never opened in Office or an Office Online iframe. */
+export async function downloadTemplateFile(id: string): Promise<ArrayBuffer> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/templates/${id}/download`)
+  } catch {
+    throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
+  }
+
+  if (!res.ok) {
+    const message =
+      res.status === 404 ? 'Template file not found.' : ((await detailOf(res)) ?? `Download failed (${res.status}).`)
+    throw new TemplateApiError(res.status, message)
+  }
+
+  return res.arrayBuffer()
 }

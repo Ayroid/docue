@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AGENT_QS, EXTRACTED, TIER_NOTES } from '@/data/mock'
+import { AGENT_QS, EXTRACTED, TIER_NOTES } from '@/data/demo'
 import { useHub, type Tier } from '@/store/HubProvider'
 import { buildChangeSpec, FIELDS_TOTAL, fieldsFilled, parseTemplate } from '@/features/generate/session'
+import { useDemoTemplate } from '@/features/generate/useDemoTemplate'
 import { useLivePreview } from '@/features/preview/useLivePreview'
 import { LivePreviewPanel } from '@/features/preview/LivePreviewPanel'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Tag } from '@/components/ui/tag'
-import { PageBody, PageHeading } from '@/components/common'
+import { DemoBadge, PageBody, PageHeading } from '@/components/common'
 import { SparkleIcon } from '@/components/icons'
 
 const TIER_OPTIONS = [
@@ -22,9 +23,12 @@ export function Generate() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const { templates, startSession, updateSession, sessions, saveDraft } = useHub()
+  const { startSession, updateSession, sessions, saveDraft } = useHub()
 
-  const template = templates.find((t) => String(t.id) === id) ?? templates[0]
+  /* Starts from the real document the Generate button came from — its title,
+     format and version are genuine even though the walkthrough itself is
+     scripted. */
+  const template = useDemoTemplate(id)
   const [chatInput, setChatInput] = useState('')
 
   /* One session per visit, unless `?session=` names an existing one to resume
@@ -35,9 +39,13 @@ export function Generate() {
   const requestedId = params.get('session')
   const resumedId = requestedId && sessions[requestedId] ? requestedId : null
   const [createdId, setCreatedId] = useState<string | null>(null)
+  /* Keyed on the route id, not `template.id` — the real template resolves
+     asynchronously, so `template` is still the fallback on the first render
+     and the session would otherwise remember that instead of the document the
+     user actually picked. */
   useEffect(() => {
-    if (!resumedId && !createdId) setCreatedId(startSession(template.id).id)
-  }, [resumedId, createdId, template.id, startSession])
+    if (!resumedId && !createdId && id) setCreatedId(startSession(id).id)
+  }, [resumedId, createdId, id, startSession])
 
   const sessionId = resumedId ?? createdId
   const session = sessionId ? sessions[sessionId] : undefined
@@ -87,10 +95,19 @@ export function Generate() {
 
   return (
     <PageBody>
-      <PageHeading
-        title="New document"
-        subtitle="Answer the agent questions and the document fills in as you go."
-      />
+      <div className="flex items-start gap-3 flex-wrap mb-[22px]">
+        <PageHeading
+          title="New document"
+          subtitle="Answer the agent questions and the document fills in as you go."
+          className="mb-0"
+        />
+        <DemoBadge className="mt-[10px]" />
+      </div>
+
+      <p className="text-[12.5px] opacity-60 -mt-[10px] mb-[18px] max-w-[70ch]">
+        This walkthrough is a demonstration. The questions and the filled-in preview are scripted, and the document
+        it creates is held in this tab only — nothing is written to the server.
+      </p>
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-5 items-stretch">
         {/* ── Conversation ─────────────────────────────────────────────── */}
@@ -168,7 +185,7 @@ export function Generate() {
               variant="secondary"
               className="whitespace-nowrap"
               disabled={answers.length === 0}
-              onClick={() => sessionId && saveDraft(sessionId)}
+              onClick={() => sessionId && saveDraft(sessionId, template.name, template.fmt)}
             >
               Save draft
             </Button>
@@ -216,7 +233,7 @@ export function Generate() {
             variant="secondary"
             className="whitespace-nowrap"
             disabled={answers.length === 0}
-            onClick={() => sessionId && saveDraft(sessionId)}
+            onClick={() => sessionId && saveDraft(sessionId, template.name, template.fmt)}
           >
             Save draft
           </Button>

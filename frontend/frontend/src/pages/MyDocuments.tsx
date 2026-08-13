@@ -1,39 +1,50 @@
-import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { DOC_FILTERS, statusClass } from '@/data/mock'
+import { statusClass } from '@/data/catalog'
 import { useHub } from '@/store/HubProvider'
 import { Button } from '@/components/ui/button'
-import { FilterTag } from '@/components/ui/tag'
 import { Table, TableCard } from '@/components/ui/table'
-import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
-import { DownloadIcon } from '@/components/icons'
+import { DemoBadge, EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
 
+/**
+ * Documents produced by the generation walkthrough, plus its saved drafts.
+ *
+ * Both lists start empty and only fill as someone runs the walkthrough — the
+ * page used to open with seven invented documents that had never been
+ * generated and no file behind them. Nothing here is stored on the server, so
+ * a reload legitimately clears it.
+ */
 export function MyDocuments() {
-  const { documents, drafts, fireToast } = useHub()
+  const { documents, drafts } = useHub()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState('All')
 
-  const filtered = useMemo(
-    () =>
-      documents.filter((d) => {
-        if (filter === 'All') return true
-        if (filter === 'Draft' || filter === 'Approved') return d.status === filter
-        return d.kind === filter
-      }),
-    [documents, filter],
-  )
+  if (!documents.length && !drafts.length) {
+    return (
+      <PageBody>
+        <PageHeading title="My documents" subtitle="Documents you've generated from a template." />
+        <EmptyState
+          title="No generated documents yet"
+          body="Pick a document in the library and choose Generate to walk through creating one. Note that generation is a demonstration — nothing is written to the server yet."
+          action={{ label: 'Browse the library', onClick: () => navigate('/discovery') }}
+        />
+      </PageBody>
+    )
+  }
 
   return (
     <PageBody>
-      <PageHeading title="My documents" subtitle={`${documents.length} generated · ${drafts.length} in-progress drafts`} />
-
-      <div className="flex gap-[9px] flex-wrap mb-[22px]">
-        {DOC_FILTERS.map((f) => (
-          <FilterTag key={f} selected={filter === f} onClick={() => setFilter(f)}>
-            {f}
-          </FilterTag>
-        ))}
+      <div className="flex items-start gap-3 flex-wrap mb-[22px]">
+        <PageHeading
+          title="My documents"
+          subtitle={`${documents.length} generated · ${drafts.length} in-progress draft${drafts.length === 1 ? '' : 's'}`}
+          className="mb-0"
+        />
+        <DemoBadge className="mt-[10px]" />
       </div>
+
+      <p className="text-[12.5px] opacity-60 -mt-[10px] mb-[22px] max-w-[70ch]">
+        Created by the generation walkthrough and held in this tab only — there is no generated-document service yet,
+        so nothing here survives a reload.
+      </p>
 
       {drafts.length ? (
         <div className="mb-9">
@@ -60,66 +71,58 @@ export function MyDocuments() {
         </div>
       ) : null}
 
-      <h4 className="mb-[14px]">Generated documents</h4>
-      {filtered.length ? (
-        <TableCard>
-          <Table className="hub-mydocs">
-            <thead>
-              <tr>
-                <th>Document</th>
-                <th>Template</th>
-                <th>Size</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((d) => (
-                <tr key={d.id}>
-                  <td>
-                    <div
-                      className="flex items-center gap-[11px] cursor-pointer min-w-0"
-                      onClick={() => navigate(`/documents/${d.id}`)}
-                    >
-                      <FormatChip size={30}>{d.fmt}</FormatChip>
-                      <span className="font-semibold truncate">{d.name}</span>
-                    </div>
-                  </td>
-                  <td className="opacity-75">{d.template} · v{d.version}</td>
-                  <td className="opacity-75 whitespace-nowrap">{d.size}</td>
-                  <td className="opacity-75 whitespace-nowrap">{d.created}</td>
-                  <td>
-                    <span className={statusClass(d.status)}>{d.status}</span>
-                  </td>
-                  <td>
-                    <div className="flex gap-2 justify-end flex-wrap">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="gap-[6px] whitespace-nowrap"
-                        onClick={() => fireToast(`Downloaded ${d.name}${d.ext}`)}
-                      >
-                        <DownloadIcon width={13} height={13} />
-                        Download
-                      </Button>
-                      <Button variant="secondary" size="xs" className="whitespace-nowrap" onClick={() => navigate(`/documents/${d.id}`)}>
-                        Open
-                      </Button>
-                    </div>
-                  </td>
+      {documents.length ? (
+        <>
+          <h4 className="mb-[14px]">Generated documents</h4>
+          <TableCard>
+            <Table className="hub-mydocs">
+              <thead>
+                <tr>
+                  <th>Document</th>
+                  <th>Template</th>
+                  <th>Created</th>
+                  <th>Status</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableCard>
-      ) : (
-        <EmptyState
-          title="No documents yet"
-          body="Generate your first document from a template in Discovery."
-          action={{ label: 'Go to Discovery', onClick: () => navigate('/discovery') }}
-        />
-      )}
+              </thead>
+              <tbody>
+                {documents.map((d) => (
+                  <tr key={d.id}>
+                    <td>
+                      <div
+                        className="flex items-center gap-[11px] cursor-pointer min-w-0"
+                        onClick={() => navigate(`/documents/${d.id}`)}
+                      >
+                        <FormatChip size={30}>{d.fmt}</FormatChip>
+                        <span className="font-semibold truncate">{d.name}</span>
+                      </div>
+                    </td>
+                    <td className="opacity-75">
+                      {d.template} · v{d.version}
+                    </td>
+                    <td className="opacity-75 whitespace-nowrap">{d.created}</td>
+                    <td>
+                      <span className={statusClass(d.status)}>{d.status}</span>
+                    </td>
+                    <td>
+                      <div className="flex gap-2 justify-end flex-wrap">
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          className="whitespace-nowrap"
+                          onClick={() => navigate(`/documents/${d.id}`)}
+                        >
+                          Open
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableCard>
+        </>
+      ) : null}
     </PageBody>
   )
 }

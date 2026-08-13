@@ -1,4 +1,4 @@
-import { AGENT_QS, FIELD_MAP, type Template } from '@/data/mock'
+import { AGENT_QS, FIELD_MAP, type DemoTemplate } from '@/data/demo'
 import type { ChangeOperation, ChangeSpec, ParsedDocument, ProvenanceKind } from '@/features/preview/types'
 import { extOf } from '@/lib/utils'
 
@@ -19,7 +19,7 @@ export const REGION_ID: Record<string, string> = {
  * `GET /templates/{id}/regions`; the shape is identical either way, so nothing
  * downstream changes when the ingestion pipeline replaces this.
  */
-export function parseTemplate(template: Template): ParsedDocument {
+export function parseTemplate(template: DemoTemplate): ParsedDocument {
   // `Confidentiality` is defined below as a protected region instead — doc
   // control owns its wording, so it is never a fillable field.
   const fields = FIELD_MAP.filter((f) => f.label !== 'Confidentiality').map((f) => ({
@@ -74,7 +74,7 @@ const PROVENANCE: Record<string, ProvenanceKind> = {
  * the document updates as the user types, without being committed as an answer.
  */
 export function buildChangeSpec(
-  template: Template,
+  template: DemoTemplate,
   answers: string[],
   tier: 'T1' | 'T2' | 'T3',
   qIndex: number,
@@ -122,4 +122,4 @@ export const totalQuestions = AGENT_QS.length
 export const fieldsFilled = (answerCount: number) => 18 + answerCount * 2
 export const FIELDS_TOTAL = 31
 
-export const draftFileName = (title: string, fmt: Template['fmt']) => title + extOf(fmt)
+export const draftFileName = (title: string, fmt: DemoTemplate['fmt']) => title + extOf(fmt)

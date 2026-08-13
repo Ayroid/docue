@@ -1,15 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ACCESS_GROUPS, QUEUE, SUBMISSIONS, SUB_FILTERS, statusClass } from '@/data/mock'
+import { statusClass } from '@/data/catalog'
 import { useHub } from '@/store/HubProvider'
 import { getTemplate, TemplateApiError, type TemplateOut } from '@/services/templates'
 import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { FilterTag } from '@/components/ui/tag'
-import { Table, TableCard, Panel, SectionLabel } from '@/components/ui/table'
+import { Table, TableCard } from '@/components/ui/table'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
-import { CheckIcon } from '@/components/icons'
 
 interface VerifyState {
   rowId: number
@@ -18,10 +16,21 @@ interface VerifyState {
   error: string | null
 }
 
+/**
+ * Doc control's view of what has come in.
+ *
+ * Only real uploads appear — templates POSTed to the backend during this
+ * visit. The page previously padded itself out with five invented
+ * submissions, a four-item "ingestion pipeline" and a table of access groups
+ * with member counts, none of which corresponded to anything; the stat tiles
+ * above them counted those invented rows.
+ *
+ * Uploads are session-scoped because the server has no submission-history
+ * route, so a reload legitimately empties this list.
+ */
 export function Admin() {
-  const { uploads, publishUpload, fireToast } = useHub()
+  const { uploads, removeUpload, fireToast } = useHub()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState('All')
   const [verify, setVerify] = useState<VerifyState | null>(null)
 
   const verifyBackend = async (rowId: number, backendId: string) => {
@@ -39,173 +48,83 @@ export function Admin() {
     }
   }
 
-  /* Live uploads from this session lead the queue; the mock submission
-     history fills it out so the page never looks empty on first load. */
-  const combined = useMemo(
-    () => [
-      ...uploads.map((u) => ({ ...u, live: true as const })),
-      ...SUBMISSIONS.map((s) => ({ ...s, live: false as const })),
-    ],
-    [uploads],
-  )
-  const filtered = combined.filter((s) => filter === 'All' || s.kind === filter)
-
-  const pendingCount = uploads.length + QUEUE.filter((q) => q.kind === 'In process').length
-  const publishedToday = QUEUE.filter((q) => q.status === 'Published').length
-
   return (
     <PageBody>
-      <PageHeading title="Admin" subtitle="Doc control — approve incoming templates and manage access." />
+      <PageHeading title="Admin" subtitle="Doc control — templates submitted in this session." />
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 mb-7">
-        {[
-          { label: 'Pending review', value: String(pendingCount) },
-          { label: 'Parsed this week', value: String(QUEUE.length) },
-          { label: 'Published today', value: String(publishedToday) },
-          { label: 'Access groups', value: String(ACCESS_GROUPS.length) },
-        ].map((s) => (
-          <Panel key={s.label}>
-            <div className="font-heading text-[26px] mb-1">{s.value}</div>
-            <div className="text-[12.5px] opacity-60">{s.label}</div>
-          </Panel>
-        ))}
-      </div>
-
-      <div className="hub-results grid grid-cols-[minmax(0,1fr)_340px] gap-6 items-start">
-        <div className="flex flex-col gap-5 min-w-0">
-          <div>
-            <div className="flex items-center gap-4 flex-wrap mb-[14px]">
-              <h4 className="m-0">Submissions</h4>
-              <div className="flex gap-[9px] flex-wrap ml-auto">
-                {SUB_FILTERS.map((f) => (
-                  <FilterTag key={f} selected={filter === f} onClick={() => setFilter(f)}>
-                    {f}
-                  </FilterTag>
-                ))}
-              </div>
-            </div>
-
-            {filtered.length ? (
-              <TableCard>
-                <Table>
-                  <thead>
-                    <tr>
-                      <th>Submission</th>
-                      <th>Status</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((s) => (
-                      <tr key={`${s.live ? 'live' : 'mock'}-${s.id}`}>
-                        <td>
-                          <div className="flex items-center gap-[11px] min-w-0">
-                            <FormatChip size={30}>{s.fmt}</FormatChip>
-                            <div className="min-w-0">
-                              <div className="font-semibold truncate">{s.name}</div>
-                              <div className="text-[12px] opacity-55">{s.meta}</div>
-                              <div className="text-[12px] opacity-55">{s.note}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={statusClass(s.status)}>{s.status}</span>
-                        </td>
-                        <td>
-                          <div className="flex gap-2 justify-end flex-wrap">
-                            {s.live && s.backendId ? (
-                              <Button
-                                variant="secondary"
-                                size="xs"
-                                className="whitespace-nowrap"
-                                disabled={verify?.rowId === s.id && verify.loading}
-                                onClick={() => verifyBackend(s.id, s.backendId!)}
-                              >
-                                {verify?.rowId === s.id && verify.loading ? 'Checking…' : 'Verify'}
-                              </Button>
-                            ) : null}
-                            {s.live && s.status !== 'Approved' ? (
-                              <>
-                                <Button
-                                  variant="primary"
-                                  size="xs"
-                                  className="whitespace-nowrap"
-                                  onClick={() => publishUpload(s.id, s.name, s.fmt)}
-                                >
-                                  Approve
-                                </Button>
-                                <Button
-                                  variant="secondary"
-                                  size="xs"
-                                  className="whitespace-nowrap"
-                                  onClick={() => fireToast(`Sent ${s.name} back for changes`)}
-                                >
-                                  Send back
-                                </Button>
-                              </>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              </TableCard>
-            ) : (
-              <EmptyState size="md" title="Nothing here" body="No submissions currently match this filter." />
-            )}
-          </div>
-
-          <div>
-            <h4 className="mb-[14px]">Ingestion pipeline</h4>
-            <div className="flex flex-col gap-3">
-              {QUEUE.map((q) => (
-                <div key={q.id} className="bg-surface rounded-card py-4 px-[18px] flex items-center gap-4 flex-wrap">
-                  <FormatChip size={34}>{q.fmt}</FormatChip>
-                  <div className="flex-[1_1_200px] min-w-[170px]">
-                    <div className="font-semibold">{q.name}</div>
-                    <div className="text-[12px] opacity-55">{q.note}</div>
-                  </div>
-                  <span className={`${statusClass(q.status)} ml-auto flex-none`}>{q.status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-4 min-w-0">
-          <Panel>
-            <SectionLabel>Access groups</SectionLabel>
-            <Table>
-              <thead>
-                <tr>
-                  <th>Group</th>
-                  <th>View</th>
-                  <th>Gen</th>
-                  <th>Admin</th>
+      {uploads.length ? (
+        <TableCard>
+          <Table>
+            <thead>
+              <tr>
+                <th>Submission</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {uploads.map((u) => (
+                <tr key={u.id}>
+                  <td>
+                    <div className="flex items-center gap-[11px] min-w-0">
+                      <FormatChip size={30}>{u.fmt}</FormatChip>
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{u.name}</div>
+                        <div className="text-[12px] opacity-55">{u.meta}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span className={statusClass(u.status)}>{u.status}</span>
+                  </td>
+                  <td>
+                    <div className="flex gap-2 justify-end flex-wrap">
+                      {u.backendId ? (
+                        <>
+                          <Button asChild variant="ghost" size="xs" className="whitespace-nowrap">
+                            <a href={`/viewer/${u.backendId}`} target="_blank" rel="noopener noreferrer">
+                              View
+                            </a>
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="xs"
+                            className="whitespace-nowrap"
+                            disabled={verify?.rowId === u.id && verify.loading}
+                            onClick={() => verifyBackend(u.id, u.backendId!)}
+                          >
+                            {verify?.rowId === u.id && verify.loading ? 'Checking…' : 'Verify'}
+                          </Button>
+                        </>
+                      ) : null}
+                      {/* Approval is local bookkeeping: the backend publishes a
+                          template the moment it is uploaded and has no review
+                          state to move it through. */}
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        className="whitespace-nowrap"
+                        onClick={() => {
+                          removeUpload(u.id)
+                          fireToast(`Cleared ${u.name} from the queue`)
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {ACCESS_GROUPS.map((g) => (
-                  <tr key={g.name}>
-                    <td>
-                      <div className="font-semibold text-[13px]">{g.name}</div>
-                      <div className="text-[11px] opacity-55">{g.members} members</div>
-                    </td>
-                    {[g.view, g.gen, g.admin].map((on, i) => (
-                      <td key={i}>{on ? <CheckIcon width={14} height={14} className="text-accent" /> : null}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </Panel>
-
-          <Button variant="secondary" block className="mt-0 whitespace-nowrap" onClick={() => navigate('/upload')}>
-            Upload template
-          </Button>
-        </div>
-      </div>
+              ))}
+            </tbody>
+          </Table>
+        </TableCard>
+      ) : (
+        <EmptyState
+          title="Nothing submitted yet"
+          body="Templates you upload in this session show up here so you can confirm they really landed on the server."
+          action={{ label: 'Upload a template', onClick: () => navigate('/upload') }}
+        />
+      )}
 
       <Dialog
         open={verify !== null}

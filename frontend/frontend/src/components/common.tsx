@@ -1,7 +1,16 @@
 import type { ReactNode } from 'react'
-import { PREVIEW_LINES } from '@/data/mock'
+import type { Fmt } from '@/data/catalog'
+import { PREVIEW_LINES } from '@/data/demo'
+import type { TemplateFormat } from '@/services/templates'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+
+/** Real templates carry a file extension; the chip speaks the prototype's Fmt. */
+export const CHIP_BY_FORMAT: Record<TemplateFormat, Fmt> = {
+  docx: 'DOC',
+  xlsx: 'XLS',
+  pptx: 'PPT',
+}
 
 /**
  * The circular format chip (DOC / XLS / PPT) used at four different sizes
@@ -47,10 +56,27 @@ export function Avatar({ initials, size = 34 }: { initials: string; size?: numbe
 }
 
 /**
- * The grey bar skeleton standing in for rendered document body text. Used on
- * the template detail preview, the generated-document page and the preview
- * dialog — all three share one set of line widths so a document looks like the
- * same document wherever you see it.
+ * Marks a screen whose content is scripted rather than real. Used across the
+ * generation walkthrough, which has no service behind it — see `data/demo.ts`.
+ */
+export function DemoBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-[6px] rounded-tag border border-dashed border-accent2-400 bg-accent2-100 text-accent2-900 text-[11px] font-semibold uppercase tracking-[.08em] py-[3px] px-[9px] whitespace-nowrap',
+        className,
+      )}
+      title="Scripted walkthrough — the document produced here is not stored anywhere"
+    >
+      Demo
+    </span>
+  )
+}
+
+/**
+ * The grey bar skeleton standing in for rendered document body text, used by
+ * the generation walkthrough's preview. Real documents are rendered from their
+ * actual bytes by `features/document-preview` instead.
  */
 export function PreviewLines({ lines = PREVIEW_LINES, flat = false }: { lines?: typeof PREVIEW_LINES; flat?: boolean }) {
   return (
