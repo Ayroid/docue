@@ -22,6 +22,12 @@ class TemplateVersion(Base):
         UUID(as_uuid=True), ForeignKey("templates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Plan §8: lineage, so a derived version knows what it came from. A line
+    # would only need version_number; this allows a branch -- "Q4 Automotive" and
+    # "Q4 Europe" can both derive from v1 without either being the other's parent.
+    parent_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("template_versions.id", ondelete="SET NULL"), nullable=True
+    )
     storage_bucket: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False)

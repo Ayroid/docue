@@ -204,6 +204,68 @@ def _resolve(schema: Any, operation: Any) -> tuple[Any | None, str | None]:
 # ── per-format op building ────────────────────────────────────────────────
 
 
+def _date_like(value: Any) -> bool:
+    from datetime import date, datetime
+
+    if isinstance(value, (date, datetime)):
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True  # an Excel serial
+    if isinstance(value, str):
+        try:
+            datetime.fromisoformat(value)
+        except ValueError:
+            return False
+        return True
+    return False
+
+
+def _number_like(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        try:
+            float(value)
+        except ValueError:
+            return False
+        return True
+    return False
+
+
+def _value_reason(fmt: str, region: Any, operation: Any) -> str | None:
+    """Why this value cannot go into this region, if it cannot.
+
+    Only enforced for xlsx, and only because that is the format where the value
+    is *converted* rather than written: a workbook date is a number wearing a
+    number format, so a string reaching `to_excel_serial` raises deep inside the
+    compiler. Word and PowerPoint store the text as given, and a docx field whose
+    detected type is `date` legitimately accepts `13/08/2026` as a string.
+
+    Caught here rather than left to raise because a model putting prose in a date
+    cell is the same class of event as a model naming a region that doesn't
+    exist -- it should be dropped with a reason a human can read, not surfaced as
+    `Invalid isoformat string`.
+    """
+    if fmt != "xlsx" or not isinstance(operation, SetValueOp):
+        return None
+    declared = operation.value_type or (
+        region.value_type if region.value_type in ("string", "number", "date") else None
+    )
+    if declared == "date" and not _date_like(operation.value):
+        return (
+            f"region holds a date (value_type={region.value_type!r}) and "
+            f"{operation.value!r} is not one; a workbook date is a serial number, "
+            "so writing text there would render as a number or fail to convert"
+        )
+    if declared == "number" and not _number_like(operation.value):
+        return f"region holds a number and {operation.value!r} is not one"
+    return None
+
+
 def _build_xlsx(schema: Any, operation: Any, region: Any) -> list[Any]:
     from app.compiler import region_ops
 
@@ -485,6 +547,10 @@ def compile_spec(
                     f"region is {region.kind} (editable=False, protected={region.protected})",
                 )
             )
+            continue
+        mismatch = _value_reason(fmt, region, operation)
+        if mismatch is not None:
+            dropped.append(DroppedOperation(index, operation.op, region.region_id, mismatch))
             continue
         try:
             ops.extend(builder(schema, operation, region))
