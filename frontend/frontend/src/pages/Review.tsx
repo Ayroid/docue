@@ -52,7 +52,7 @@ export function Review() {
         <EmptyState
           title="Nothing to review yet"
           body="Start a document from a template, answer the agent's questions, then come back here to commit."
-          action={{ label: 'Go to Discovery', onClick: () => navigate('/') }}
+          action={{ label: 'Go to Discovery', onClick: () => navigate('/discovery') }}
         />
       </PageBody>
     )

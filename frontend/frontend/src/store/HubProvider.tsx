@@ -36,6 +36,9 @@ export interface Session {
 }
 
 interface HubState {
+  loggedIn: boolean
+  login: () => void
+  logout: () => void
   role: Role
   sidebarOpen: boolean
   toggleSidebar: () => void
@@ -66,6 +69,7 @@ const HubContext = createContext<HubState | null>(null)
 let sessionSeq = 0
 
 export function HubProvider({ children }: { children: ReactNode }) {
+  const [loggedIn, setLoggedIn] = useState(false)
   const [role] = useState<Role>('Admin')
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
@@ -200,6 +204,9 @@ export function HubProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<HubState>(
     () => ({
+      loggedIn,
+      login: () => setLoggedIn(true),
+      logout: () => setLoggedIn(false),
       role,
       sidebarOpen,
       toggleSidebar: () => setSidebarOpen((v) => !v),
@@ -221,6 +228,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
       closeUploadDialog: () => setUploadDialogOpen(false),
     }),
     [
+      loggedIn,
       role,
       sidebarOpen,
       templates,

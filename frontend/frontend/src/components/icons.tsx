@@ -105,6 +105,14 @@ export const CheckIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
+export const LogoutIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="M16 17l5-5-5-5" />
+    <path d="M21 12H9" />
+  </svg>
+)
+
 export const CloseIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)} strokeLinejoin={undefined}>
     <path d="M6 6l12 12M18 6 6 18" />

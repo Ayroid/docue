@@ -111,7 +111,7 @@ export function Results() {
               <h4 className="m-0">Results</h4>
               <p className="opacity-65 text-[13px] mt-[2px] mb-0">{resultLabel}</p>
             </div>
-            <Button variant="ghost" className="ml-auto whitespace-nowrap" onClick={() => navigate('/')}>
+            <Button variant="ghost" className="ml-auto whitespace-nowrap" onClick={() => navigate('/discovery')}>
               Back to Discovery
             </Button>
           </div>

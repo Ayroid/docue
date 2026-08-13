@@ -12,6 +12,7 @@ import {
   CheckIcon,
   DocsIcon,
   LibraryIcon,
+  LogoutIcon,
   SettingsIcon,
   SidebarIcon,
   UploadIcon,
@@ -23,15 +24,33 @@ import {
  * the "sent for approval" dialog.
  */
 export function AppShell() {
-  const { sidebarOpen, toggleSidebar, role, templates, documents, drafts, uploads, toast, uploadDialogOpen, closeUploadDialog } =
-    useHub()
+  const {
+    sidebarOpen,
+    toggleSidebar,
+    role,
+    templates,
+    documents,
+    drafts,
+    uploads,
+    toast,
+    uploadDialogOpen,
+    closeUploadDialog,
+    logout,
+  } = useHub()
   const navigate = useNavigate()
   const location = useLocation()
   const [notifsOpen, setNotifsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const signOut = () => {
+    setSettingsOpen(false)
+    logout()
+    navigate('/')
+  }
 
   const publishedCount = templates.length - 12
   const navItems = [
-    { to: '/', label: 'Discovery', icon: <LibraryIcon />, badge: String(128 + publishedCount) },
+    { to: '/discovery', label: 'Discovery', icon: <LibraryIcon />, badge: String(128 + publishedCount) },
     { to: '/documents', label: 'My documents', icon: <DocsIcon />, badge: String(documents.length + drafts.length) },
     { to: '/analytics', label: 'Analytics', icon: <AnalyticsIcon />, badge: '' },
     ...(role === 'Admin'
@@ -49,14 +68,14 @@ export function AppShell() {
   /* Discovery owns the search, template detail, generate and review routes —
      they all read as "browsing the library" in the sidebar. */
   const isDiscoveryBranch =
-    location.pathname === '/' ||
+    location.pathname === '/discovery' ||
     location.pathname.startsWith('/search') ||
     location.pathname.startsWith('/templates') ||
     location.pathname.startsWith('/generate')
 
   const currentNav = isDiscoveryBranch
-    ? '/'
-    : navItems.find((i) => location.pathname.startsWith(i.to) && i.to !== '/')?.to
+    ? '/discovery'
+    : navItems.find((i) => location.pathname.startsWith(i.to) && i.to !== '/discovery')?.to
 
   return (
     <div className="flex min-h-screen items-stretch">
@@ -64,7 +83,7 @@ export function AppShell() {
         <aside className="w-[250px] flex-none bg-surface py-5 px-4 flex flex-col gap-[6px] sticky top-0 h-screen">
           <Button
             className="flex items-center gap-[10px] justify-start py-[6px] px-2 mb-[14px]"
-            onClick={() => navigate('/welcome')}
+            onClick={() => navigate('/')}
           >
             <div className="w-[30px] h-[30px] rounded-pill bg-accent grid place-items-center text-bg font-heading text-[14px]">
               T
@@ -97,7 +116,7 @@ export function AppShell() {
             </Button>
           </div>
 
-          <div className="pt-4 border-t border-divider flex items-center gap-[10px]">
+          <div className="pt-4 border-t border-divider flex items-center gap-[10px] relative">
             <Avatar initials="RM" />
             <div className="flex-1 min-w-0">
               <div className="text-[13.5px] font-semibold truncate">Riya Mehta</div>
@@ -105,9 +124,29 @@ export function AppShell() {
                 {role === 'Admin' ? 'Delivery · Doc control admin' : 'Delivery · Consultant'}
               </div>
             </div>
-            <Button variant="bare" size="icon" title="Settings">
+            <Button
+              variant="bare"
+              size="icon"
+              title="Settings"
+              onClick={() => setSettingsOpen((v) => !v)}
+            >
               <SettingsIcon width={17} height={17} />
             </Button>
+
+            {settingsOpen ? (
+              <div className="elev-lg absolute bottom-[46px] right-0 w-[180px] bg-neutral-100 rounded-[12px] p-[6px] z-20">
+                <button
+                  type="button"
+                  className="hub-nav"
+                  onClick={signOut}
+                >
+                  <span className="flex w-[18px] h-[18px] flex-none">
+                    <LogoutIcon width={17} height={17} />
+                  </span>
+                  <span className="flex-1 text-left">Log out</span>
+                </button>
+              </div>
+            ) : null}
           </div>
         </aside>
       ) : null}

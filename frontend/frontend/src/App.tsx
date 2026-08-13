@@ -1,5 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { useHub } from '@/store/HubProvider'
 import { AppShell } from '@/components/layout/AppShell'
+import { Landing } from '@/pages/Landing'
+import { Login } from '@/pages/Login'
 import { Discovery } from '@/pages/Discovery'
 import { Results } from '@/pages/Results'
 import { TemplateDetail } from '@/pages/TemplateDetail'
@@ -10,13 +13,16 @@ import { MyDocuments } from '@/pages/MyDocuments'
 import { Admin } from '@/pages/Admin'
 import { Analytics } from '@/pages/Analytics'
 import { Upload } from '@/pages/Upload'
-import { Welcome } from '@/pages/Welcome'
 
 export function App() {
+  const { loggedIn } = useHub()
+
   return (
     <Routes>
+      <Route path="/" element={loggedIn ? <Navigate to="/discovery" replace /> : <Landing />} />
+      <Route path="/login" element={loggedIn ? <Navigate to="/discovery" replace /> : <Login />} />
       <Route element={<AppShell />}>
-        <Route path="/" element={<Discovery />} />
+        <Route path="/discovery" element={<Discovery />} />
         <Route path="/search" element={<Results />} />
         <Route path="/templates/:id" element={<TemplateDetail />} />
         <Route path="/templates/:id/generate" element={<Generate />} />
@@ -26,7 +32,6 @@ export function App() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/upload" element={<Upload />} />
-        <Route path="/welcome" element={<Welcome />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

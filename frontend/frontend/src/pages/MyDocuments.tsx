@@ -117,7 +117,7 @@ export function MyDocuments() {
         <EmptyState
           title="No documents yet"
           body="Generate your first document from a template in Discovery."
-          action={{ label: 'Go to Discovery', onClick: () => navigate('/') }}
+          action={{ label: 'Go to Discovery', onClick: () => navigate('/discovery') }}
         />
       )}
     </PageBody>

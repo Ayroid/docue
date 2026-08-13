@@ -29,7 +29,7 @@ export function TemplateDetail() {
           <Button
             variant="ghost"
             className="py-1 px-2 mb-[6px] whitespace-nowrap"
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/discovery')}
           >
             Back to Discovery
           </Button>
