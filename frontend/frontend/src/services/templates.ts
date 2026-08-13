@@ -67,7 +67,34 @@ async function detailOf(res: Response): Promise<string | null> {
   return body && typeof body === 'object' && 'detail' in body ? String(body.detail) : null
 }
 
-export async function uploadTemplate(file: File): Promise<TemplateOut> {
+/**
+ * What `POST /templates` answers with — a 202 and a job id, not the finished
+ * template. Ingestion (region detection) takes 15-40s, so the upload returns
+ * as soon as the file is stored and the job is queued. The template row itself
+ * exists immediately, so `getTemplate(template_id)` resolves right away.
+ */
+export interface UploadAccepted {
+  template_id: string
+  version_id: string
+  job_id: string
+  /** Always 'ingesting' — the job has been queued. */
+  status: string
+}
+
+/**
+ * The id of the template just uploaded, from either upload contract.
+ *
+ * A server on the current API answers 202 with `template_id`; one still on the
+ * previous build answers 201 with a whole `TemplateOut`, whose id is `id`.
+ * Reading both means a running server that hasn't been restarted since the
+ * ingestion work landed doesn't silently break uploads. Drop the fallback once
+ * every deployment is on the ingestion API.
+ */
+export function uploadedTemplateId(result: UploadAccepted | TemplateOut): string {
+  return 'template_id' in result ? result.template_id : result.id
+}
+
+export async function uploadTemplate(file: File): Promise<UploadAccepted | TemplateOut> {
   const form = new FormData()
   form.append('file', file)
 

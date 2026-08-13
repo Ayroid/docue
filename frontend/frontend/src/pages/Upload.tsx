@@ -2,7 +2,7 @@ import { useCallback, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CATS, type Fmt } from '@/data/catalog'
 import { useHub } from '@/store/HubProvider'
-import { TemplateApiError, uploadTemplate, type TemplateFormat } from '@/services/templates'
+import { getTemplate, TemplateApiError, uploadTemplate, uploadedTemplateId, type TemplateFormat } from '@/services/templates'
 import { formatBytes } from '@/lib/utils'
 import { DocumentStage } from '@/features/document-preview/DocumentStage'
 import { Button } from '@/components/ui/button'
@@ -66,10 +66,22 @@ export function Upload() {
     setSubmitting(true)
     setError(null)
     try {
-      const template = await uploadTemplate(file)
-      const fmt = FMT_BY_FORMAT[template.format] ?? 'DOC'
-      const size = template.current_version ? formatBytes(template.current_version.size_bytes) : 'unknown size'
-      addUpload(name || template.title, fmt, `.${template.format} · ${size} · submitted just now`, template.id)
+      /* 202 with a job id — the file is stored and region detection is queued.
+         The template row exists by then, so read it back for the real title,
+         format and size rather than describing the row from the picked file. */
+      const templateId = uploadedTemplateId(await uploadTemplate(file))
+      const stored = await getTemplate(templateId).catch(() => null)
+
+      const storedFormat = stored?.format ?? format
+      const fmt = storedFormat ? FMT_BY_FORMAT[storedFormat] : 'DOC'
+      const size = stored?.current_version ? formatBytes(stored.current_version.size_bytes) : formatBytes(file.size)
+
+      addUpload(
+        name || stored?.title || file.name.replace(/\.[^.]+$/, ''),
+        fmt,
+        `.${storedFormat ?? 'file'} · ${size} · submitted just now`,
+        templateId,
+      )
       navigate('/admin')
     } catch (err) {
       setError(err instanceof TemplateApiError ? err.message : 'Something went wrong uploading that file.')
