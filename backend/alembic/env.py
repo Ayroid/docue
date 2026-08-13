@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.db.base import Base
-from app.models import Template, TemplateVersion  # noqa: F401  ensures models are registered on Base.metadata
+import app.models  # noqa: F401  ensures every model is registered on Base.metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
