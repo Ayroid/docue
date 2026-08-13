@@ -4,6 +4,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _artifact import write_artifact  # noqa: E402
 
 from app.compiler.xlsx_surgical import SetValueOp, apply_change_spec  # noqa: E402
 from app.ingestion.fingerprint import fingerprint_xlsx  # noqa: E402
@@ -57,9 +60,8 @@ def main() -> int:
 
     print(f"structural QA: PASS -- parts lost: {result.lost_parts}")
 
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    OUTPUT_PATH.write_bytes(compiled)
-    print(f"Wrote {OUTPUT_PATH} -- open this in real Microsoft Excel to verify visually.")
+    written = write_artifact(OUTPUT_PATH, compiled)
+    print(f"Wrote {written} -- open this in real Microsoft Excel to verify visually.")
     return 0
 
 
