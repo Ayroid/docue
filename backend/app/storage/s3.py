@@ -8,6 +8,7 @@ from typing import BinaryIO
 import boto3
 import certifi
 from botocore.client import Config
+from botocore.response import StreamingBody
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import settings
@@ -59,6 +60,14 @@ def upload_file(fileobj: BinaryIO, key: str, content_type: str) -> None:
         )
     except (BotoCoreError, ClientError) as exc:
         raise RuntimeError(f"S3 upload failed for key '{key}': {exc}") from exc
+
+
+def download_file(key: str) -> StreamingBody:
+    client = get_s3_client()
+    try:
+        return client.get_object(Bucket=settings.s3_bucket_name, Key=key)["Body"]
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError(f"S3 download failed for key '{key}': {exc}") from exc
 
 
 def delete_file(key: str) -> None:
