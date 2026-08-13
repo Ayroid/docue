@@ -1,10 +1,23 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.templates import router as templates_router
 from app.core.config import settings
+from app.db.session import check_db_connection
 
-app = FastAPI(title="TemplateHub API")
+logging.basicConfig(level=logging.INFO)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    check_db_connection()
+    yield
+
+
+app = FastAPI(title="TemplateHub API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
