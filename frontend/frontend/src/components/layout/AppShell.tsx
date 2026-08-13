@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useHub } from '@/store/HubProvider'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
@@ -9,9 +9,12 @@ import { Icon } from '@/components/ui/icon'
 import { Avatar, FormatChip } from '@/components/common'
 
 /**
- * The signed-in shell: a fixed brand bar with global search, a tab strip
- * beneath it, and the two pieces of global chrome the app hangs off its root —
- * the toast and the "sent for approval" dialog.
+ * The signed-in shell: a fixed brand bar, a tab strip beneath it, and the two
+ * pieces of global chrome the app hangs off its root — the toast and the "sent
+ * for approval" dialog.
+ *
+ * No search field up here: Discovery's hero owns the search box, so a second
+ * one in the chrome only duplicated it on every page.
  *
  * The design puts navigation across the top rather than down the side, so the
  * old sidebar's collapse toggle now drives a mobile nav drawer; `sidebarOpen`
@@ -23,7 +26,6 @@ export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [query, setQuery] = useState('')
 
   /* The badge counts what the server actually holds. */
   const { templates, loading: templatesLoading } = useRealTemplates()
@@ -32,11 +34,6 @@ export function AppShell() {
     setSettingsOpen(false)
     logout()
     navigate('/')
-  }
-
-  const search = (e: FormEvent) => {
-    e.preventDefault()
-    navigate(`/search?q=${encodeURIComponent(query)}`)
   }
 
   const navItems = [
@@ -73,19 +70,6 @@ export function AppShell() {
               TemplateHub
             </span>
           </Link>
-
-          <form onSubmit={search} className="flex-1 max-w-2xl hidden md:block">
-            <div className="relative flex items-center">
-              <Icon name="search" size={20} className="absolute left-4 text-neutral-500 pointer-events-none" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search templates…"
-                aria-label="Search templates"
-                className="input pl-12"
-              />
-            </div>
-          </form>
 
           <div className="flex items-center gap-2 relative">
             <Button
