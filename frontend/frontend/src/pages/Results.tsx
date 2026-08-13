@@ -1,6 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
+import { useSemanticSearch } from '@/features/search/useSemanticSearch'
+import { SearchResultCard } from '@/features/search/SearchResultCard'
 import { filterTemplates } from '@/services/search'
 import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -24,8 +26,24 @@ export function Results() {
   const [format, setFormat] = useState('all')
   const [draftQuery, setDraftQuery] = useState(query)
 
-  const { templates, loading, error } = useRealTemplates()
-  const results = useMemo(() => filterTemplates(templates, query, format), [templates, query, format])
+  const { templates, loading: listing, error: listError } = useRealTemplates()
+  /* A query goes to the backend, which fuses keyword and vector ranking; an
+     empty one browses the library. `POST /search` answers a blank query with
+     nothing, and this page doubles as the browse view. */
+  const search = useSemanticSearch(query)
+
+  /* Format filtering is applied after ranking rather than pushed into the
+     query, because the backend does not filter by format -- so this narrows
+     the ranked list instead of pretending to have ranked a narrower one. */
+  const hits = useMemo(
+    () => (search.response?.results ?? []).filter((r) => format === 'all' || r.format === format),
+    [search.response, format],
+  )
+  const browse = useMemo(() => (query ? [] : filterTemplates(templates, '', format)), [templates, query, format])
+
+  const loading = query ? search.loading : listing
+  const error = query ? search.error : listError
+  const count = query ? hits.length : browse.length
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -49,12 +67,19 @@ export function Results() {
         {/* ── Filter rail ────────────────────────────────────────────────── */}
         <aside className="flex flex-col gap-4">
           <div className="bg-neutral-200 border border-divider rounded-card p-4">
-            <h3 className="text-title-lg m-0 mb-1">Search results</h3>
+            <h3 className="text-title-lg m-0 mb-1">{query ? 'Search results' : 'The library'}</h3>
             <p className="text-body-md text-neutral-700 m-0">
               {loading
                 ? 'Searching the library…'
-                : `${results.length} template${results.length === 1 ? '' : 's'} found${query ? ` for "${query}"` : ''}`}
+                : query
+                  ? `${count} document${count === 1 ? '' : 's'} matching your search`
+                  : `${count} document${count === 1 ? '' : 's'} in the library`}
             </p>
+            {/* Reported because it is measured, not estimated — a hybrid search
+                that takes a second should say so rather than feel broken. */}
+            {!loading && query && search.response ? (
+              <p className="text-label-md text-neutral-600 m-0 mt-1 tabular-nums">{search.response.latency_ms}ms</p>
+            ) : null}
           </div>
 
           <div className="bg-surface border border-divider rounded-card p-4">
@@ -88,12 +113,34 @@ export function Results() {
 
         {/* ── Results ────────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-4 min-w-0">
+          {search.response?.degraded ? (
+            /* The keyword half still answered; only the semantic half is down.
+               Saying so beats silently returning worse results. */
+            <p className="text-label-md text-neutral-600 m-0">{search.response.degraded}</p>
+          ) : null}
+
           {error ? (
             <div className="bg-surface border border-divider rounded-card p-5 text-body-md text-[color:var(--md-error)]">
               {error}
             </div>
-          ) : results.length ? (
-            results.map((t, i) => (
+          ) : query ? (
+            /* Ranked hits carry the backend's own explanation of *why* they
+               ranked, which the browse card has nothing to say. */
+            hits.length ? (
+              <div className="flex flex-col gap-3">
+                {hits.map((hit) => (
+                  <SearchResultCard key={hit.template_id} result={hit} />
+                ))}
+              </div>
+            ) : !loading ? (
+              <EmptyState
+                title="Nothing matches that yet"
+                body="Only templates that finished indexing are searchable. Try fewer words, or clear the format filter."
+                action={{ label: 'Clear search', onClick: () => setParams({ q: '' }) }}
+              />
+            ) : null
+          ) : browse.length ? (
+            browse.map((t, i) => (
               <article
                 key={t.id}
                 className={`bg-surface border border-divider rounded-card p-5 flex gap-4 items-start transition-shadow ${
@@ -140,9 +187,9 @@ export function Results() {
             ))
           ) : !loading ? (
             <EmptyState
-              title="Nothing matches that yet"
-              body="Try fewer words, or clear the format filter."
-              action={{ label: 'Clear search', onClick: () => setParams({ q: '' }) }}
+              title="Nothing here yet"
+              body="Upload a .docx, .xlsx or .pptx, or clear the format filter."
+              action={{ label: 'Clear filter', onClick: () => setFormat('all') }}
             />
           ) : null}
         </div>

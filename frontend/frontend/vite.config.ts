@@ -2,8 +2,14 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 
+/* Overridable because port 8000 is not always available -- on Windows it can
+   be held by a phantom WSL/Hyper-V reservation that no process owns, and a
+   teammate's stale server will happily answer with an older build. Set
+   VITE_API_TARGET to point at whatever port the backend actually came up on. */
+const API_TARGET = process.env.VITE_API_TARGET ?? 'http://localhost:8000'
+
 const API_PROXY = {
-  '/api': { target: 'http://localhost:8000', changeOrigin: true },
+  '/api': { target: API_TARGET, changeOrigin: true },
 }
 
 export default defineConfig({

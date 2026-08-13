@@ -10,6 +10,8 @@ import { Field, Input } from '@/components/ui/input'
 import { FilterTag } from '@/components/ui/tag'
 import { Panel } from '@/components/ui/table'
 import { PageBody, PageHeading } from '@/components/common'
+import { IngestionProgressPanel } from '@/features/ingestion/IngestionProgress'
+import { useIngestionJob } from '@/features/ingestion/useIngestionJob'
 import { UploadIcon } from '@/components/icons'
 import { Icon } from '@/components/ui/icon'
 
@@ -45,8 +47,14 @@ export function Upload() {
   const [category, setCategory] = useState(CATEGORIES[0])
   const [file, setFile] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  /* Kept after the upload returns so the job can be watched in place. The 202
+     is the start of the work, not the end of it: detection and the model pass
+     take up to a minute, and without this the page would claim success while
+     the template was still unusable. */
+  const [tracking, setTracking] = useState<{ templateId: string; jobId: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const ingestion = useIngestionJob(tracking?.templateId ?? null, tracking?.jobId ?? null)
   const format = file ? formatFromFileName(file.name) : null
   const ready = Boolean(file && format)
 
@@ -70,7 +78,9 @@ export function Upload() {
       /* 202 with a job id — the file is stored and region detection is queued.
          The template row exists by then, so read it back for the real title,
          format and size rather than describing the row from the picked file. */
-      const templateId = uploadedTemplateId(await uploadTemplate(file))
+      const accepted = await uploadTemplate(file)
+      const templateId = uploadedTemplateId(accepted)
+      if ('job_id' in accepted) setTracking({ templateId, jobId: accepted.job_id })
       const stored = await getTemplate(templateId).catch(() => null)
 
       const storedFormat = stored?.format ?? format
@@ -83,7 +93,6 @@ export function Upload() {
         `.${storedFormat ?? 'file'} · ${size} · submitted just now`,
         templateId,
       )
-      navigate('/admin')
     } catch (err) {
       setError(err instanceof TemplateApiError ? err.message : 'Something went wrong uploading that file.')
     } finally {
@@ -154,11 +163,26 @@ export function Upload() {
             variant="primary"
             block
             className="mt-0 whitespace-nowrap"
-            disabled={!ready || submitting}
+            disabled={!ready || submitting || ingestion.active}
             onClick={submit}
           >
-            {submitting ? 'Uploading…' : 'Submit for approval'}
+            {submitting ? 'Uploading…' : ingestion.active ? 'Processing…' : 'Submit for approval'}
           </Button>
+
+          {/* The 202 is the start of the work. Showing the job here is what
+              turns a silent 45 seconds into something a user can read. */}
+          <IngestionProgressPanel progress={ingestion} />
+
+          {tracking && !ingestion.active && (
+            <Button
+              variant="secondary"
+              block
+              className="whitespace-nowrap"
+              onClick={() => navigate(`/templates/${tracking.templateId}`)}
+            >
+              Open template
+            </Button>
+          )}
         </Panel>
 
         {file && format ? (
