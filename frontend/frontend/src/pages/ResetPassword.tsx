@@ -1,20 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthApiError, resendOtp, resetPassword } from '@/services/auth'
+import { PASSWORD_HINT, passwordProblem } from '@/lib/password'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/input'
 import { AuthLayout, FormError, FormNotice } from '@/pages/auth/AuthLayout'
-
-/* Same rules as `app/core/security.py::password_problem`, checked here only to
-   answer without a round trip. The server enforces them and decides. */
-function passwordProblem(password: string): string | null {
-  if (password.length < 8) return 'Password must be at least 8 characters.'
-  if (password === password.toLowerCase() || password === password.toUpperCase()) {
-    return 'Password must contain both upper and lower case letters.'
-  }
-  if (!/\d/.test(password)) return 'Password must contain at least one digit.'
-  return null
-}
 
 /**
  * Redeem a reset code and set a new password.
@@ -137,9 +127,7 @@ export function ResetPassword() {
             required
           />
         </Field>
-        <p className="text-label-md text-neutral-600 mb-4 mt-0">
-          At least 8 characters, with upper and lower case and a digit.
-        </p>
+        <p className="text-label-md text-neutral-600 mb-4 mt-0">{PASSWORD_HINT}</p>
         <Field label="Confirm new password" htmlFor="reset-confirm" className="mb-5 text-left">
           <Input
             id="reset-confirm"

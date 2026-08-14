@@ -1,22 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthApiError, register } from '@/services/auth'
+import { PASSWORD_HINT, passwordProblem } from '@/lib/password'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/input'
 import { AuthLayout, FormError } from '@/pages/auth/AuthLayout'
-
-/* Mirrors `app/core/security.py::password_problem`. Checked here purely to
-   give the answer without a round trip -- the server enforces the same rules
-   and is the one that decides, so the two can never disagree in a way that
-   matters. */
-function passwordProblem(password: string): string | null {
-  if (password.length < 8) return 'Password must be at least 8 characters.'
-  if (password === password.toLowerCase() || password === password.toUpperCase()) {
-    return 'Password must contain both upper and lower case letters.'
-  }
-  if (!/\d/.test(password)) return 'Password must contain at least one digit.'
-  return null
-}
 
 export function Register() {
   const navigate = useNavigate()
@@ -121,9 +109,7 @@ export function Register() {
             required
           />
         </Field>
-        <p className="text-label-md text-neutral-600 mb-4 mt-0">
-          At least 8 characters, with upper and lower case and a digit.
-        </p>
+        <p className="text-label-md text-neutral-600 mb-4 mt-0">{PASSWORD_HINT}</p>
         <Field label="Confirm password" htmlFor="reg-confirm" className="mb-5 text-left">
           <Input
             id="reg-confirm"
