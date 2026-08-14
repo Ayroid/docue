@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { formatBytes } from '@/lib/utils'
 import { downloadTemplateFile, getTemplate, TemplateApiError, type TemplateOut } from '@/services/templates'
 import { saveTemplateToDisk } from '@/features/document-library/saveToDisk'
 import { DocumentStage } from '@/features/document-preview/DocumentStage'
 import { Button } from '@/components/ui/button'
+import { Icon } from '@/components/ui/icon'
 import { Tag } from '@/components/ui/tag'
 import { DocumentPreviewSkeleton } from '@/components/ui/skeleton'
 import { DownloadIcon } from '@/components/icons'
@@ -12,7 +13,8 @@ import { DownloadIcon } from '@/components/icons'
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
 
 /**
- * A document on a page of its own, opened in a new tab from Discovery.
+ * A document on a page of its own, opened from the detail page's "Open full
+ * page".
  *
  * Deliberately outside `AppShell`: this route is meant to be a browser tab you
  * read a document in, so it gets the full window width rather than sharing it
@@ -28,8 +30,18 @@ type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | {
  */
 export function DocumentViewer() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [load, setLoad] = useState<Load>({ state: 'loading' })
   const [downloadNote, setDownloadNote] = useState<string | null>(null)
+
+  /* This is normally a fresh tab, which has nothing behind it — `navigate(-1)`
+     would leave the reader staring at a blank one. A history length of 1 is
+     exactly that case, and the Templates page is the sensible way back into the
+     app from a tab that was opened straight at a document. */
+  const goBack = useCallback(() => {
+    if (window.history.length > 1) navigate(-1)
+    else navigate('/library')
+  }, [navigate])
 
   useEffect(() => {
     if (!id) return
@@ -93,7 +105,11 @@ export function DocumentViewer() {
   if (!template) {
     return (
       <div className="min-h-screen bg-neutral-200">
-        <header className="flex items-center bg-surface border-b border-divider py-[16px] px-[clamp(14px,3vw,28px)]">
+        <header className="flex items-center gap-3 bg-surface border-b border-divider py-[16px] px-[clamp(14px,3vw,28px)]">
+          <Button variant="secondary" size="sm" className="flex-none whitespace-nowrap" onClick={goBack}>
+            <Icon name="arrow_back" size={16} />
+            Back
+          </Button>
           <span className="text-[13px] opacity-60">
             {load.state === 'failed' ? 'Document unavailable' : 'Opening document…'}
           </span>
@@ -122,12 +138,27 @@ export function DocumentViewer() {
         version?.created_at ?? template.created_at,
       ).toLocaleDateString()}`}
       loadBytes={loadBytes}
+      leading={
+        <Button variant="secondary" size="sm" className="flex-none whitespace-nowrap" onClick={goBack}>
+          <Icon name="arrow_back" size={16} />
+          Back
+        </Button>
+      }
       actions={
         <>
           <Tag variant="accent2" className="flex-none whitespace-nowrap">
             v{version?.version_number ?? 1}
           </Tag>
           {downloadNote ? <span className="text-[12px] text-accent2-700 whitespace-nowrap">{downloadNote}</span> : null}
+          <Button
+            variant="primary"
+            size="sm"
+            className="gap-[7px] whitespace-nowrap flex-none"
+            onClick={() => navigate(`/templates/${template.id}/generate`)}
+          >
+            <Icon name="edit_document" size={16} />
+            Use document
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -137,10 +168,13 @@ export function DocumentViewer() {
             <DownloadIcon width={14} height={14} />
             Download
           </Button>
-          {/* A plain anchor, not a router Link: this tab was opened straight at
-              /viewer, so there is no history to go back to. */}
+          {/* A router Link now rather than a plain anchor: this page is reached
+              from inside the app as well as in a fresh tab, and a full reload
+              on the in-app path throws away the session's warm state for
+              nothing. It works in a fresh tab too — the route is inside the
+              router either way. */}
           <Button asChild variant="ghost" size="sm" className="whitespace-nowrap flex-none">
-            <a href={`/templates/${template.id}`}>Open in Template Hub</a>
+            <Link to={`/templates/${template.id}`}>Details</Link>
           </Button>
         </>
       }

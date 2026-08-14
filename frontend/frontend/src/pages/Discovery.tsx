@@ -2,13 +2,18 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SEARCH_EXAMPLES } from '@/data/catalog'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
+import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
 import { SkeletonGroup, TemplateCardSkeleton } from '@/components/ui/skeleton'
 import { EmptyState, PageBody } from '@/components/common'
 import { RealTemplateCard } from '@/components/TemplateCard'
 
+/** A front door shows a sample, not an inventory — the full set is one click
+    away on the Templates page. */
+const CURATED_LIMIT = 5
+
 /**
- * The hub's front door: search first, then the library as cards.
+ * The hub's front door: search first, then a handful of templates as cards.
  *
  * "Curated for you" is ordered newest-first. The API records no usage, no
  * owner and no per-person history, so there is no personal signal to rank on —
@@ -23,13 +28,21 @@ export function Discovery() {
 
   const curated = useMemo(
     () =>
-      [...templates].sort(
-        (a, b) =>
-          new Date(b.current_version?.created_at ?? b.created_at).getTime() -
-          new Date(a.current_version?.created_at ?? a.created_at).getTime(),
-      ),
+      [...templates]
+        .sort(
+          (a, b) =>
+            new Date(b.current_version?.created_at ?? b.created_at).getTime() -
+            new Date(a.current_version?.created_at ?? a.created_at).getTime(),
+        )
+        .slice(0, CURATED_LIMIT),
     [templates],
   )
+
+  /* The count comes from `templates`, not from the sliced `curated` — the
+     section says how big the library is, and reading it off the capped list
+     would report "5 available" however many there really are. */
+  const total = templates.length
+  const capped = total > CURATED_LIMIT
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -44,7 +57,7 @@ export function Discovery() {
         <div className="pointer-events-none absolute -bottom-32 -right-32 w-64 h-64 rounded-pill bg-accent-400 opacity-10 blur-3xl" />
 
         <div className="relative z-10 max-w-2xl">
-          <h1 className="text-headline-lg mb-2">What document are you looking for?</h1>
+          <h1 className="text-headline-lg mb-2">What template are you looking for?</h1>
           <p className="text-body-lg text-white/80 m-0">
             Search across approved YMSLI templates using natural language.
           </p>
@@ -85,28 +98,44 @@ export function Discovery() {
         </form>
       </section>
 
-      {/* ── Documents curated for you ───────────────────────────────────── */}
+      {/* ── Templates curated for you ───────────────────────────────────── */}
       <section className="flex flex-col gap-5">
-        <div className="min-w-0">
-          <h2 className="text-headline-md text-ink m-0">Documents curated for you</h2>
-          <p className="text-body-md text-neutral-700 m-0 mt-1">
-            {loading
-              ? 'Loading the library…'
-              : error
-                ? 'The library is unavailable right now.'
-                : `Approved templates, newest first — ${curated.length} available.`}
-          </p>
+        <div className="flex items-end gap-4 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-headline-md text-ink m-0">Templates curated for you</h2>
+            <p className="text-body-md text-neutral-700 m-0 mt-1">
+              {loading
+                ? 'Loading the library…'
+                : error
+                  ? 'The library is unavailable right now.'
+                  : capped
+                    ? /* Say which few these are. "5 available" off a capped list
+                         would under-report the library by however many it hides. */
+                      `The ${CURATED_LIMIT} newest of ${total} approved templates.`
+                    : `Approved templates, newest first — ${total} available.`}
+            </p>
+          </div>
+
+          {/* The way to the rest of them. Without it the cap silently hides the
+              library from anyone who takes this section as the whole of it. */}
+          {!loading && !error && total > 0 ? (
+            <Button variant="secondary" className="flex-none" onClick={() => navigate('/library')}>
+              Browse all templates
+              <Icon name="arrow_forward" size={18} />
+            </Button>
+          ) : null}
         </div>
 
         {loading ? (
-          /* Was six flat grey blocks at the card's height. Same height, but the
-             card's actual anatomy now — title, meta row, action row — so the
-             wait shows what is coming rather than only where it will go. */
+          /* Exactly as many placeholders as the section can render, so the grid
+             does not shrink the moment the real cards land. They carry the
+             card's actual anatomy — title, description, tags, meta, actions —
+             so the wait shows what is coming rather than only where it will go. */
           <SkeletonGroup
-            label="Loading the library"
-            className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]"
+            label="Loading templates"
+            className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(320px,1fr))] items-stretch"
           >
-            {Array.from({ length: 6 }).map((_, i) => (
+            {Array.from({ length: CURATED_LIMIT }).map((_, i) => (
               <TemplateCardSkeleton key={i} />
             ))}
           </SkeletonGroup>
@@ -116,8 +145,8 @@ export function Discovery() {
           </div>
         ) : curated.length === 0 ? (
           <EmptyState
-            title="The library is empty"
-            body="Upload a .docx, .xlsx or .pptx and it will appear here for everyone to find."
+            title="No templates yet"
+            body="Upload a .docx, .xlsx or .pptx and it will appear here for everyone to find once an admin approves it."
             action={{ label: 'Upload a template', onClick: () => navigate('/upload') }}
           />
         ) : (

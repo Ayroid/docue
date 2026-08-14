@@ -102,27 +102,46 @@ export function SkeletonText({
 }
 
 /**
- * A stand-in for one `RealTemplateCard`, at the same height.
+ * A stand-in for one `RealTemplateCard`.
  *
- * 232px is the figure `Discovery` was already hard-coding for its placeholder
- * boxes; it lives here now so the card and its skeleton can only drift apart
- * in one place.
+ * Built from the card's own blocks — icon tile and two-line title, the
+ * description, the tag row, the meta line, then the action row — inside the
+ * same `hub-tcard`, so the two can only drift apart if the card is restructured
+ * and this is not. The height follows from the same gaps rather than being
+ * pinned to a number that has to be re-measured by hand.
  */
 export function TemplateCardSkeleton() {
   return (
-    <div className="hub-tcard relative h-[232px]">
-      <Skeleton className="absolute top-4 right-4" width={64} height={20} rounded="pill" />
-      <div className="pr-20">
-        <Skeleton height={16} width="90%" className="mb-2" />
-        <Skeleton height={16} width="55%" />
+    <div className="hub-tcard">
+      <div className="flex items-start gap-3">
+        <Skeleton width={40} height={40} rounded="md" className="flex-none" />
+        {/* No status pill placeholder: the card only shows one for a pending or
+            rejected template, which is the rare case, so reserving that corner
+            on every skeleton would promise something most cards never fill. */}
+        <div className="min-w-0 flex-1">
+          <Skeleton height={16} width="88%" className="mb-2" />
+          <Skeleton height={16} width="54%" className="mb-2" />
+          <Skeleton height={11} width="40%" rounded="sm" />
+        </div>
       </div>
-      <div className="mt-auto flex items-center justify-between gap-3">
-        <Skeleton height={12} width={92} rounded="sm" />
+
+      <SkeletonText lines={2} className="min-h-10" />
+
+      <div className="flex items-center gap-1.5 min-h-6">
+        {[62, 48, 54].map((w, i) => (
+          <Skeleton key={i} width={w} height={20} rounded="pill" />
+        ))}
+      </div>
+
+      <div className="mt-auto flex items-center justify-between gap-3 border-t border-divider pt-3">
+        <Skeleton height={12} width={132} rounded="sm" />
         <Skeleton height={12} width={72} rounded="sm" />
       </div>
-      <div className="flex items-center gap-2 border-t border-divider pt-4">
-        <Skeleton height={14} width={54} rounded="sm" />
-        <Skeleton className="ml-auto" height={30} width={104} rounded="pill" />
+
+      <div className="flex items-center gap-2">
+        <Skeleton height={34} rounded="pill" className="flex-1" />
+        <Skeleton height={34} rounded="pill" className="flex-1" />
+        <Skeleton width={36} height={36} rounded="pill" className="flex-none" />
       </div>
     </div>
   )
