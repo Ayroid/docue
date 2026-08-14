@@ -15,6 +15,7 @@ import {
   type SpecOut,
 } from '@/services/sessions'
 import { getTemplate, getTemplateRegions, type TemplateOut } from '@/services/templates'
+import { promoteVersion, PromotionApiError, type Promotion } from '@/services/promotions'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
@@ -53,7 +54,8 @@ const FMT_LABEL: Record<string, string> = { xlsx: 'XLS', docx: 'DOC', pptx: 'PPT
 export function Review() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { commitSession: recordDocument, fireToast } = useHub()
+  const { commitSession: recordDocument, fireToast, role, userId } = useHub()
+  const isAdmin = role === 'Admin'
 
   const [session, setSession] = useState<SessionOut | null>(null)
   const [template, setTemplate] = useState<TemplateOut | null>(null)
@@ -63,6 +65,7 @@ export function Review() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [committing, setCommitting] = useState(false)
+  const [note, setNote] = useState('')
 
   useEffect(() => {
     if (!sessionId) return
@@ -148,7 +151,16 @@ export function Review() {
   const claims = qa ? preservationClaims(qa.structural, qa.protected_regions) : []
   const lostParts = (qa?.structural.lost_parts as string[] | undefined) ?? []
 
-  const handleCommit = async () => {
+  /**
+   * Commit, and optionally ask for the result to become the template itself.
+   *
+   * The promotion is a second call rather than a flag on the commit, because it
+   * needs the version id the commit mints. A failure there is reported without
+   * losing the document: the file is compiled, stored and downloadable whatever
+   * doc control later decides, and telling someone their document was lost when
+   * only the request failed would be a lie they'd act on.
+   */
+  const handleCommit = async (promote: boolean) => {
     setCommitting(true)
     setError(null)
     try {
@@ -157,13 +169,42 @@ export function Review() {
         setError('QA failed on the real compile — nothing was saved.')
         return
       }
+
+      let promoted: Promotion | null = null
+      if (promote) {
+        try {
+          promoted = await promoteVersion(
+            session.template_id,
+            result.result_version_id,
+            note.trim() || null,
+            userId,
+          )
+        } catch (err) {
+          const message =
+            err instanceof PromotionApiError && err.status === 401
+              ? 'The document was created, but you need to be signed in to submit it as a template version.'
+              : `The document was created, but the version request failed: ${
+                  err instanceof Error ? err.message : 'unknown error'
+                }`
+          setError(message)
+          return
+        }
+      }
+
       const docId = recordDocument(
         session.session_id,
         template.title,
         String(result.result_version_number ?? ''),
         (FMT_LABEL[template.format] ?? 'DOC') as never,
       )
-      fireToast(`Version ${result.result_version_number} created`)
+      // The server decides which of the two happened, not the local role.
+      fireToast(
+        promoted === null
+          ? `Version ${result.result_version_number} created`
+          : promoted.status === 'approved'
+            ? `Published as v${promoted.version_number} — re-indexing now`
+            : 'Sent to doc control for approval',
+      )
       navigate(`/documents/${docId}`, { state: { downloadUrl: result.download_url } })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The commit failed.')
@@ -328,10 +369,43 @@ export function Review() {
               block
               className="mt-0 whitespace-nowrap"
               disabled={committing || !qa || qa.overall !== 'pass'}
-              onClick={() => void handleCommit()}
+              onClick={() => void handleCommit(false)}
             >
               {committing ? 'Compiling…' : 'Create document'}
             </Button>
+
+            {/* The version-control path. Separate from "Create document"
+                because most runs produce a one-off document that has no
+                business replacing the template everyone else starts from. */}
+            <div className="bg-surface rounded-card p-[14px] flex flex-col gap-[10px]">
+              <div>
+                <div className="text-[13px] font-semibold">Make this the template</div>
+                <p className="text-[11.5px] opacity-60 mt-[2px]">
+                  {isAdmin
+                    ? 'Publishes as the next version. It is re-indexed, and searches return it instead of the current one.'
+                    : 'Sends it to doc control. They decide whether it becomes the next version.'}
+                </p>
+              </div>
+              <textarea
+                className="w-full bg-bg rounded-[8px] p-[10px] text-[12.5px] resize-y min-h-[62px]"
+                placeholder={
+                  isAdmin ? 'What changed in this version? (optional)' : 'Why should this replace the current version?'
+                }
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                disabled={committing}
+              />
+              <Button
+                variant="secondary"
+                block
+                className="mt-0 whitespace-nowrap"
+                disabled={committing || !qa || qa.overall !== 'pass'}
+                onClick={() => void handleCommit(true)}
+              >
+                {isAdmin ? 'Create & publish as new version' : 'Create & submit for approval'}
+              </Button>
+            </div>
+
             {qa && qa.overall !== 'pass' ? (
               <p className="text-[11.5px] opacity-60">
                 QA did not pass, so there is nothing safe to commit. Go back and adjust an answer.

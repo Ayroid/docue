@@ -69,6 +69,15 @@ interface HubState {
   login: () => void
   logout: () => void
   role: Role
+  /**
+   * The signed-in account's id, sent to the backend as `X-User-Id`.
+   *
+   * Null until the auth branch fills it in — this provider does not invent one.
+   * Version-control actions (promote, approve, reject) are attributable and the
+   * backend answers 401 without a real account, which is the correct outcome:
+   * an approval trail with a placeholder id in it is worse than no approval.
+   */
+  userId: string | null
   sidebarOpen: boolean
   toggleSidebar: () => void
 
@@ -103,6 +112,9 @@ let sessionSeq = 0
 export function HubProvider({ children }: { children: ReactNode }) {
   const [loggedIn, setLoggedIn] = useState(false)
   const [role] = useState<Role>('Admin')
+  // Owned by the auth branch. Left null here rather than seeded with a fake id
+  // — see the note on `userId` in `HubState`.
+  const [userId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const [uploads, setUploads] = useState<Upload[]>([])
@@ -227,6 +239,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
       login: () => setLoggedIn(true),
       logout: () => setLoggedIn(false),
       role,
+      userId,
       sidebarOpen,
       toggleSidebar: () => setSidebarOpen((v) => !v),
       uploads,
@@ -250,6 +263,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
     [
       loggedIn,
       role,
+      userId,
       sidebarOpen,
       uploads,
       lastUpload,

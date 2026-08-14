@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/common'
+import { VersionHistory } from '@/components/VersionHistory'
 import { Icon } from '@/components/ui/icon'
 import { DownloadIcon } from '@/components/icons'
 
@@ -185,6 +186,9 @@ export function TemplateDetail() {
               ))}
             </div>
           </div>
+
+          {/* Every version of this template, with what each one changed. */}
+          <VersionHistory templateId={doc.id} />
         </div>
       </div>
     </PageBody>

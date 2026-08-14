@@ -7,6 +7,7 @@ import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
+import { PromotionQueue } from '@/components/PromotionQueue'
 import { Icon } from '@/components/ui/icon'
 
 interface VerifyState {
@@ -51,6 +52,10 @@ export function Admin() {
   return (
     <PageBody>
       <PageHeading title="Admin" subtitle="Doc control — templates submitted in this session." />
+
+      {/* Server state, unlike the uploads list below: a promotion request has
+          to survive the tab that raised it or nobody ever decides it. */}
+      <PromotionQueue />
 
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
