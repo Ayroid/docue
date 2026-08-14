@@ -120,7 +120,19 @@ export function uploadedTemplateId(result: UploadAccepted | TemplateOut): string
   return 'template_id' in result ? result.template_id : result.id
 }
 
-export async function uploadTemplate(file: File): Promise<UploadAccepted | TemplateOut> {
+/**
+ * Upload a file.
+ *
+ * With `templateId` it becomes that template's next version rather than a new
+ * template — same gate, same ingestion, same queue, but no new row in the
+ * library. The server refuses a file of a different type: a template's format
+ * is part of its identity, and every document ever generated from it assumes
+ * one.
+ */
+export async function uploadTemplate(
+  file: File,
+  templateId?: string,
+): Promise<UploadAccepted | TemplateOut> {
   const form = new FormData()
   form.append('file', file)
 
@@ -128,11 +140,14 @@ export async function uploadTemplate(file: File): Promise<UploadAccepted | Templ
   try {
     /* No Content-Type header: the browser has to set it itself so it can add
        the multipart boundary. Only the Authorization header is ours. */
-    res = await fetch(`${API_BASE_URL}/templates`, {
-      method: 'POST',
-      headers: { ...authHeader() },
-      body: form,
-    })
+    res = await fetch(
+      templateId ? `${API_BASE_URL}/templates/${templateId}/versions` : `${API_BASE_URL}/templates`,
+      {
+        method: 'POST',
+        headers: { ...authHeader() },
+        body: form,
+      },
+    )
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }

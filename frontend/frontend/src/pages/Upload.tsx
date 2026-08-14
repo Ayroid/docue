@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type ChangeEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { CATS, type Fmt } from '@/data/catalog'
 import { useHub } from '@/store/HubProvider'
 import { getTemplate, TemplateApiError, uploadTemplate, uploadedTemplateId, type TemplateFormat } from '@/services/templates'
@@ -41,6 +41,10 @@ function formatFromFileName(name: string): TemplateFormat | null {
  */
 export function Upload() {
   const navigate = useNavigate()
+  /* `?template=` turns this page into "upload the next version of that
+     template" — the file half of the Update template choice. */
+  const [searchParams] = useSearchParams()
+  const updatingTemplateId = searchParams.get('template')
   const { addUpload } = useHub()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
@@ -78,7 +82,7 @@ export function Upload() {
       /* 202 with a job id — the file is stored and region detection is queued.
          The template row exists by then, so read it back for the real title,
          format and size rather than describing the row from the picked file. */
-      const accepted = await uploadTemplate(file)
+      const accepted = await uploadTemplate(file, updatingTemplateId ?? undefined)
       const templateId = uploadedTemplateId(accepted)
       if ('job_id' in accepted) setTracking({ templateId, jobId: accepted.job_id })
       const stored = await getTemplate(templateId).catch(() => null)
@@ -102,8 +106,12 @@ export function Upload() {
   return (
     <PageBody>
       <PageHeading
-        title="Upload template"
-        subtitle="Doc control reviews every submission before it appears in Discovery."
+        title={updatingTemplateId ? 'Upload a new version' : 'Upload template'}
+        subtitle={
+          updatingTemplateId
+            ? 'This replaces the template once doc control approves it. Until then the library keeps serving the current version.'
+            : 'Doc control reviews every submission before it appears in Discovery.'
+        }
       />
 
       <div className="hub-results grid grid-cols-[340px_minmax(0,1fr)] gap-6 items-start">

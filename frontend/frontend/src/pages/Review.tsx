@@ -151,36 +151,39 @@ export function Review() {
   /**
    * Commit, and optionally put the result forward as the template's next version.
    *
-   * `publish` is the difference, and it does not mean "publish": it points the
-   * template at this version and sends it to doc control, who decide whether it
-   * becomes what the library serves. So nothing here claims the version is live
-   * — approving is someone else's action, on the Admin page.
-   *
-   * Either way the document is compiled, stored and downloadable. A commit
-   * nobody puts forward is a perfectly good one-off document.
+   * The two produce genuinely different things, so the response is read
+   * differently: a plain commit answers with `result_document_id` — the
+   * caller's own file, no version number, nobody's to approve — and a
+   * submission answers with `result_version_id` and goes to doc control.
+   * Checking only for a version id here would have reported "QA failed" on
+   * every successful document.
    */
   const handleCommit = async (submitAsVersion: boolean) => {
     setCommitting(true)
     setError(null)
     try {
-      const result = await commitSession(session.session_id, { publish: submitAsVersion })
-      if (result.overall !== 'pass' || !result.result_version_id) {
+      const result = await commitSession(session.session_id, { submitAsVersion })
+      const produced = result.result_document_id ?? result.result_version_id
+      if (result.overall !== 'pass' || !produced) {
         setError('QA failed on the real compile — nothing was saved.')
         return
       }
 
-      const docId = recordDocument(
+      recordDocument(
         session.session_id,
         template.title,
         String(result.result_version_number ?? ''),
         (FMT_LABEL[template.format] ?? 'DOC') as never,
       )
-      fireToast(
-        submitAsVersion
-          ? `v${result.result_version_number} sent to doc control for approval`
-          : `Version ${result.result_version_number} created`,
-      )
-      navigate(`/documents/${docId}`, { state: { downloadUrl: result.download_url } })
+
+      if (submitAsVersion) {
+        fireToast(`v${result.result_version_number} sent to doc control for approval`)
+        navigate(`/templates/${session.template_id}`)
+      } else {
+        fireToast('Document created')
+        // My Documents lists it for real now, so there is somewhere to land.
+        navigate('/documents')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The commit failed.')
     } finally {

@@ -155,6 +155,8 @@ export interface CompileResponse {
   warnings: string[]
   duration_ms: number
   result_version_id: string | null
+  /** Set instead of `result_version_id` when the commit produced a document. */
+  result_document_id: string | null
   result_version_number: number | null
   download_url: string | null
   qa_run_id: string | null
@@ -283,13 +285,26 @@ export function compileSession(
   return post<CompileResponse>(`/sessions/${sessionId}/compile`, { dry_run: true, overrides })
 }
 
-/** Compile for real and keep the result as a new version. */
+/**
+ * Compile for real and keep the result.
+ *
+ * By default that is a **document** — the caller's own file, with no version
+ * number and no claim on the template it was made from. `submitAsVersion` is
+ * the other thing: it mints a template version and sends it to doc control.
+ * Filling a form's fields makes a document, not a better form, so the default
+ * is the common case.
+ */
 export function commitSession(
   sessionId: string,
-  options: { publish?: boolean; overrides?: Record<string, unknown> } = {},
+  options: {
+    submitAsVersion?: boolean
+    publish?: boolean
+    overrides?: Record<string, unknown>
+  } = {},
 ): Promise<CompileResponse> {
   return post<CompileResponse>(`/sessions/${sessionId}/commit`, {
     dry_run: false,
+    submit_as_version: options.submitAsVersion ?? false,
     publish: options.publish ?? false,
     overrides: options.overrides ?? {},
   })
