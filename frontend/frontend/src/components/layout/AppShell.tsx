@@ -84,17 +84,22 @@ export function AppShell() {
     ...(isAdmin ? [{ to: '/admin', label: 'Admin', badge: pending ? String(pending) : '' }] : []),
   ]
 
-  /* Discovery owns the library, search, template detail, generate and review
-     routes. `/library` has its own tab, so it is excluded here. */
-  const isHomeBranch =
-    location.pathname === '/discovery' ||
-    location.pathname.startsWith('/search') ||
+  /* Two branches rather than one. Templates is the page a template is met on
+     now, so template detail, generate and review belong under that tab —
+     landing on a detail page from a card used to highlight Home, which is not
+     where the reader came from. Home keeps the front door and search. */
+  const isTemplateBranch =
+    location.pathname.startsWith('/library') ||
     location.pathname.startsWith('/templates') ||
     location.pathname.startsWith('/generate')
 
-  const currentNav = isHomeBranch
-    ? '/discovery'
-    : navItems.find((i) => location.pathname.startsWith(i.to) && i.to !== '/discovery')?.to
+  const isHomeBranch = location.pathname === '/discovery' || location.pathname.startsWith('/search')
+
+  const currentNav = isTemplateBranch
+    ? '/library'
+    : isHomeBranch
+      ? '/discovery'
+      : navItems.find((i) => location.pathname.startsWith(i.to) && i.to !== '/discovery')?.to
 
   return (
     <div className="min-h-screen flex flex-col bg-bg">

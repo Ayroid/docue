@@ -143,7 +143,10 @@ export function TemplateDetail() {
   return (
     <PageBody>
       <nav className="flex items-center gap-2 text-label-md text-neutral-600">
-        <button type="button" className="bg-transparent border-0 p-0 cursor-pointer font-[inherit] text-label-md hover:text-accent" onClick={() => navigate('/discovery')}>
+        {/* Named "Templates", so it goes to the Templates page. It pointed at
+            Discovery, which is the front door — a crumb that lands somewhere
+            other than the thing it is named after is a wrong turn. */}
+        <button type="button" className="bg-transparent border-0 p-0 cursor-pointer font-[inherit] text-label-md hover:text-accent" onClick={() => navigate('/library')}>
           Templates
         </button>
         <Icon name="chevron_right" size={14} />

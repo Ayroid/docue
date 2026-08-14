@@ -22,6 +22,7 @@ export function DocumentStage({
   title,
   meta,
   loadBytes,
+  leading,
   actions,
   className,
   bodyClassName,
@@ -31,6 +32,9 @@ export function DocumentStage({
   title: string
   meta?: string
   loadBytes: () => Promise<ArrayBuffer>
+  /** Leading header content, before the format tile — a Back control, and so
+      on. Navigation belongs on the left of what it navigates away from. */
+  leading?: ReactNode
   /** Trailing header content — version tag, Download, and so on. */
   actions?: ReactNode
   className?: string
@@ -44,6 +48,7 @@ export function DocumentStage({
   return (
     <div className={cn('flex flex-col', backdrop, className)}>
       <header className="sticky top-0 z-10 flex items-center gap-3 flex-wrap bg-surface border-b border-divider py-[10px] px-[clamp(14px,3vw,28px)]">
+        {leading}
         <FormatChip size={34}>{CHIP_BY_FORMAT[format]}</FormatChip>
         <div className="flex-1 min-w-0">
           <div className="font-heading text-[16px] leading-[1.2] truncate">{title}</div>
