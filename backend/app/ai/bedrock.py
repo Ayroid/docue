@@ -35,6 +35,7 @@ Four environment facts are baked in, each of which cost real time to find:
 
 import json
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -119,9 +120,27 @@ def get_runtime():
     No explicit credentials: a Bedrock API key lives in
     `AWS_BEARER_TOKEN_BEDROCK` and botocore picks it up from the environment.
     Passing the S3 access keys here would authenticate as the wrong principal.
+
+    **The token has to be put in the environment first, and nothing was doing
+    it.** `.env` is read by pydantic-settings into a `Settings` object; it does
+    not touch `os.environ`, which is the only place botocore looks. So a machine
+    that configured Bedrock exactly as `.env.example` documents fell through to
+    the default credential chain, authenticated as whatever principal happened
+    to be there -- often none -- and failed every call. It looked like an outage
+    rather than a configuration gap, because every stage catches `BedrockError`
+    and degrades quietly: the planner falls back to structural grouping, the
+    extractor keeps the raw answer, the deriver writes nothing. Three different
+    "unavailable" messages, one missing environment variable.
+
+    A token already exported wins: `settings.aws_bearer_token_bedrock` is
+    already the resolved value, because pydantic-settings prefers a real
+    environment variable over the `.env` line.
     """
     global _runtime
     if _runtime is None:
+        token = settings.aws_bearer_token_bedrock
+        if token:
+            os.environ["AWS_BEARER_TOKEN_BEDROCK"] = token
         _runtime = boto3.client(
             "bedrock-runtime",
             region_name=settings.resolved_bedrock_region,

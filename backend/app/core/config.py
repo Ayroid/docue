@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     bedrock_region: str | None = None
     bedrock_access_key_id: str | None = None
     bedrock_secret_access_key: str | None = None
+    # The Bedrock API key (`ABSK...`). botocore reads this from the *process
+    # environment*, not from us, so `get_runtime` exports it before building the
+    # client -- see the note there.
+    #
+    # Declaring the field is what makes `.env` work at all. Without it,
+    # `extra="ignore"` silently discarded the line, and a machine configured
+    # exactly as `.env.example` documents got a backend where every model call
+    # failed at runtime with nothing said at startup.
+    aws_bearer_token_bedrock: str | None = None
     # The `us.` prefix is a cross-region inference profile, not a typo: a bare
     # `anthropic.claude-sonnet-5` is refused with "Invocation with on-demand
     # throughput isn't supported. Retry with the ID or ARN of an inference

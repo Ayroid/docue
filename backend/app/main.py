@@ -18,10 +18,48 @@ from app.db.session import check_db_connection
 
 logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger("app")
+
+
+def check_bedrock_credentials() -> None:
+    """Say at startup whether the model stages can run at all.
+
+    Every stage catches `BedrockError` and degrades quietly on purpose -- an
+    outage should cost a longer interview, not a 500. The cost of that design is
+    that a *configuration* problem is indistinguishable from an outage, and it
+    surfaces one screen at a time: "the questions are grouped structurally",
+    "the extractor was unavailable", "derivation was unavailable". Three
+    messages, no cause named, nothing in the log but warnings.
+
+    So the check happens once, here, where it can name the fix. It resolves
+    credentials without calling Bedrock -- a live `InvokeModel` at startup would
+    cost money on every reload and fail for reasons that are not configuration.
+    """
+    import boto3
+
+    if settings.aws_bearer_token_bedrock:
+        logger.info("Bedrock: using the API key from AWS_BEARER_TOKEN_BEDROCK")
+        return
+    if boto3.Session().get_credentials() is not None:
+        logger.info(
+            "Bedrock: no AWS_BEARER_TOKEN_BEDROCK; falling back to the default "
+            "credential chain, which must hold bedrock:InvokeModel"
+        )
+        return
+    logger.error(
+        "Bedrock has NO credentials: AWS_BEARER_TOKEN_BEDROCK is unset and the "
+        "default credential chain resolved nothing. Every model stage will fail "
+        "and the app will report itself as running without the language model -- "
+        "questions grouped structurally, nothing extracted, nothing derived. "
+        "Set AWS_BEARER_TOKEN_BEDROCK in .env (the ABSK... key, not an "
+        "access-key pair) and restart."
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     check_db_connection()
+    check_bedrock_credentials()
     yield
 
 
