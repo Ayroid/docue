@@ -29,19 +29,29 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "TURN_ANSWER",
     "TURN_INSTRUCTION",
+    "TURN_PREFILL",
     "SessionProgress",
     "answered_count",
+    "freeze_ask_plan",
     "load_question_plan",
     "record_turn",
     "save_question_plan",
     "session_questions",
 ]
 
-# What a turn was. Only an answer advances the interview -- an instruction is a
+# What a turn was. Only an answer advances the interview -- everything else is a
 # turn in the transcript and nowhere else, which is what keeps "change the
 # heading" from consuming the next question.
 TURN_ANSWER = "answer"
 TURN_INSTRUCTION = "instruction"
+# Notes the user pasted before being asked anything. Distinct from an
+# instruction rather than folded into it: both are recorded with no question_id,
+# so anything discriminating on that alone cannot tell the opening evidence from
+# a mid-interview correction -- and provenance has to.
+TURN_PREFILL = "prefill"
+
+# Where the frozen per-session interview lives inside `known_context`.
+_ASK_PLAN_KEY = "ask_plan"
 
 
 @dataclass
@@ -71,16 +81,17 @@ class SessionProgress:
 def answered_count(session: GenerationSession) -> int:
     """How many planned questions have been answered.
 
-    Not `len(turns)`. A free-form instruction is stored as a turn so the chat
-    transcript replays in the order it happened, and counting it would advance
-    the question pointer -- one aside would silently skip a question and the
-    user would never be asked it. Turns written before instructions existed
-    carry no `kind` and are answers, which is what the default says.
+    Not `len(turns)`. Instructions and pasted notes are stored as turns so the
+    chat transcript replays in the order it happened, and counting either would
+    advance the question pointer -- one aside would silently skip a question and
+    the user would never be asked it.
+
+    Counts what *is* an answer rather than excluding what is not, so a turn kind
+    added later is non-advancing by default. Turns written before `kind` existed
+    carry none and are answers, which is what the default says.
     """
     return sum(
-        1
-        for turn in session.turns or []
-        if turn.get("kind", TURN_ANSWER) != TURN_INSTRUCTION
+        1 for turn in session.turns or [] if turn.get("kind", TURN_ANSWER) == TURN_ANSWER
     )
 
 
@@ -179,8 +190,79 @@ def load_question_plan(
     ]
 
 
+def freeze_ask_plan(
+    questions: list[PlannedQuestion], prefilled: set[str]
+) -> dict[str, Any]:
+    """The interview THIS session will run, decided once and never again.
+
+    A question keeps its cached wording and its number. What changes is its
+    cluster: regions the user's pasted notes already supplied move out of
+    `covers_regions` and into `prefilled_regions`, so the question is now only
+    about what is genuinely still missing, and the screen can show what it
+    already has.
+
+    **No question is ever dropped, even when the notes supplied every region it
+    covered.** Dropping it is the shorter interview and the wrong trade: the
+    question that covers a region is the only place a mis-extraction becomes
+    visible, so removing it deletes exactly the audit that would have caught it.
+    A fully-supplied question is shown with an empty cluster and confirmed in one
+    click. Keeping them also means the ask-list is never empty, which is what
+    lets the deriver keep firing on the last answer as it always has.
+
+    **The whole payload is frozen, not just the numbers.** `save_question_plan`
+    replaces a version's rows wholesale, and `POST /sessions` triggers exactly
+    that whenever the cached plan is a structural fallback -- so storing indices
+    would let another session shorten this one's list, or change its wording,
+    underneath a positional pointer. The per-version cache still earns its keep:
+    what it saves is the planner *model call*, not a row read.
+    """
+    return {
+        _ASK_PLAN_KEY: [
+            {
+                "question_no": q.question_no,
+                "question_text": q.question_text,
+                "hint": q.hint,
+                "example": q.example,
+                "covers_regions": [r for r in q.covers_regions if r not in prefilled],
+                "prefilled_regions": [r for r in q.covers_regions if r in prefilled],
+            }
+            for q in questions
+        ]
+    }
+
+
 def session_questions(session: GenerationSession, db: Session) -> list[PlannedQuestion]:
-    return load_question_plan(db, session.base_version_id)
+    """The questions this session asks, in order, stable for its whole life.
+
+    Deliberately **not** recomputed from `filled_values`. That set grows on every
+    turn -- `record_turn` merges both `extracted` and `volunteered` -- and again
+    on every review-screen `PATCH /spec/{i}`. `_current` is positional, so a live
+    predicate over it would reorder this list mid-interview: answer q2, the list
+    becomes [q3, q5], `answered_count` is 1, and `questions[1]` is q5 -- q3 is
+    never asked at all.
+
+    Sessions created before the ask plan existed have no frozen payload and fall
+    back to the version's cached plan, which is exactly what they ran on.
+    """
+    rows = (session.known_context or {}).get(_ASK_PLAN_KEY)
+    if not isinstance(rows, list):
+        return load_question_plan(db, session.base_version_id)
+
+    # Reconstructed field by field, never `PlannedQuestion(**row)`: `as_dict()`
+    # emits `question_id`, which is a property rather than a dataclass field, so
+    # splatting a round-tripped dict raises TypeError.
+    return [
+        PlannedQuestion(
+            question_no=int(row["question_no"]),
+            question_text=row["question_text"],
+            hint=row.get("hint"),
+            example=row.get("example"),
+            covers_regions=list(row.get("covers_regions") or []),
+            prefilled_regions=list(row.get("prefilled_regions") or []),
+        )
+        for row in rows
+        if isinstance(row, dict) and "question_no" in row and "question_text" in row
+    ]
 
 
 def record_turn(

@@ -28,7 +28,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.api.v1.generate import _fetch, _load, compile_and_store
@@ -38,16 +47,21 @@ from app.models.user import User
 from app.conversation.context import assemble_context
 from app.conversation.deriver import derive_values
 from app.conversation.extractor import extract_answer
+from app.conversation.notes_text import extract_note_text
 from app.conversation.planner import PlannedQuestion, plan_questions
-from app.conversation.scope import addressable_ids, askable
+from app.conversation.scope import addressable_ids, askable, askable_ids
 from app.conversation.state import (
     TURN_INSTRUCTION,
+    TURN_PREFILL,
     SessionProgress,
     answered_count,
+    freeze_ask_plan,
     load_question_plan,
     record_turn,
     save_question_plan,
+    session_questions,
 )
+from app.core.config import settings
 from app.db.session import get_db
 from app.ingestion.detect import detect
 from app.models.generation_session import (
@@ -58,7 +72,7 @@ from app.models.generation_session import (
 )
 from app.models.template import Template
 from app.models.template_version import TemplateVersion
-from app.planning.change_planner import plan_change_spec
+from app.planning.change_planner import plan_change_spec, writes_cleanly
 from app.schemas.generate import CompileResponse
 from app.schemas.session import (
     AnswerIn,
@@ -79,6 +93,29 @@ from app.schemas.session import (
 logger = logging.getLogger("app.sessions")
 
 router = APIRouter(prefix="/sessions", tags=["generation"])
+
+# ── reading pasted notes ──────────────────────────────────────────────────
+
+# A page of notes can supply thirty regions and a twelve-row table, and
+# truncation in the extractor is total rather than partial -- `complete_json`
+# raises on `max_tokens` and the whole read comes back empty. Sized for the
+# worst document in the corpus rather than the common one, because the failure
+# is all-or-nothing.
+PREFILL_MAX_TOKENS = 16000
+
+# Goes into `extract_answer`'s `question_text` slot. There is no question, so
+# the slot is used to say so: without it the reader is told the question was ""
+# and has to guess what it is being asked to do with a page of prose.
+PREFILL_FRAMING = (
+    "The user pasted their own prior notes before being asked anything. No question "
+    "was put to them. Read the whole text and fill in every region it supplies, "
+    "including several rows of a table where the notes list several items. Leave "
+    "every region the notes do not supply empty -- that is a correct outcome, not a "
+    "gap for you to close."
+)
+
+# What the transcript calls that turn.
+PREFILL_QUESTION_TEXT = "Notes provided before the interview started"
 
 
 # ── loading ───────────────────────────────────────────────────────────────
@@ -149,7 +186,12 @@ def _progress(
         # (`PATCH /spec/{i}`) writes a derived region into `filled_values`
         # afterwards, and adding the lengths then counts it twice and can put
         # the headline counter above `fields_total`.
-        fields_filled=len(set(filled) | set(derived)),
+        #
+        # Intersected with `askable` for the same reason the denominator is
+        # askable: a user's notes, or an instruction, can fill a heading, which
+        # is writable but never asked about and so is not in `fields_total`.
+        # Without the clamp the counter reads "32 of 31".
+        fields_filled=len((set(filled) | set(derived)) & set(askable_ids(schema))),
         fields_total=_fields_total(schema),
     )
 
@@ -194,6 +236,39 @@ def _labels(schema: Any) -> dict[str, str]:
     return {r.region_id: (r.label or r.region_id) for r in schema.regions}
 
 
+def _writable_values(schema: Any, values: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the values that would really reach the document.
+
+    Everything the conversation writes eventually passes `plan_change_spec` and
+    the compiler pre-flight, both of which drop what they cannot write. That is
+    fine for an answer -- the user watched the question, and a dropped value is
+    a visible gap on the review screen.
+
+    It is not fine for a value read out of pasted notes, because that value also
+    *narrows a question*. A value that will be silently dropped later would mark
+    its region as supplied, shrink the question that covered it, and leave a
+    blank nobody was ever asked to fill. So the same two gates run here, up
+    front: the region must be one this document can write, and the value must be
+    a shape that produces an operation for it.
+    """
+    by_id = {r.region_id: r for r in schema.regions}
+    kept: dict[str, Any] = {}
+    for region_id, value in values.items():
+        region = by_id.get(region_id)
+        if region is None or not region.editable or region.protected:
+            continue
+        if not writes_cleanly(schema.format, region, value):
+            logger.info("notes: %s dropped, no operation writes that value", region_id)
+            continue
+        if not isinstance(value, list):
+            rejection = value_rejection_reason(schema.format, region, value)
+            if rejection:
+                logger.info("notes: %s dropped, %s", region_id, rejection)
+                continue
+        kept[region_id] = value
+    return kept
+
+
 def _session_out(
     session: GenerationSession,
     template: Template,
@@ -233,11 +308,16 @@ def start_session(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> SessionCreateOut:
-    """Triage the document and plan the questions. Plan §10 ③ then ④.
+    """Triage the document, read any pasted notes, and plan the questions.
 
-    Both stages degrade rather than fail: with Bedrock unreachable every
-    editable region lands in `must_ask` and the planner falls back to its
-    structural grouping, which is a longer interview over the same regions.
+    Plan §10 ③ then ④, with a reading pass in front of them when the caller
+    brought `notes`.
+
+    Every stage degrades rather than fails: with Bedrock unreachable every
+    editable region lands in `must_ask`, the planner falls back to its
+    structural grouping, and the notes go unread but are kept verbatim on the
+    transcript. The result is a longer interview over the same regions, never an
+    error and never a silently empty document.
     """
     template, version = _load(db, request.template_id, request.version_id)
     schema = detect(_fetch(version), template.format)
@@ -246,6 +326,35 @@ def start_session(
     context = assemble_context(
         schema, template_meta=meta, intent=request.intent
     )
+
+    # Read the notes **before** planning. Not cosmetic ordering: the planner
+    # branch below writes `question_plans` inside a savepoint guarded by a
+    # unique index, and running a 10-30s model call between that flush and the
+    # commit would hold the row against every other session starting on this
+    # version for the whole duration.
+    notes = (request.notes or "").strip()
+    prefilled: dict[str, Any] = {}
+    prefill_degraded = False
+    if notes:
+        reading = extract_answer(
+            schema,
+            notes,
+            [],  # nothing was asked; the whole document is in play
+            also_regions=addressable_ids(schema),
+            question_text=PREFILL_FRAMING,
+            max_tokens=PREFILL_MAX_TOKENS,
+        )
+        # `covers_regions=[]`, so everything the reader placed arrives as
+        # volunteered. It is not an aside -- it is the entire point of the call.
+        prefilled = _writable_values(schema, reading.all_values)
+        prefill_degraded = not reading.ok
+        logger.info(
+            "session on %s: read %d region(s) from %d characters of notes%s",
+            template.title,
+            len(prefilled),
+            len(notes),
+            " (degraded)" if prefill_degraded else "",
+        )
 
     # The plan is a property of the version, so a cache hit here means the
     # second session on this document costs no planner call at all.
@@ -281,18 +390,53 @@ def start_session(
         tier=request.tier,
         user_intent=request.intent,
         status=STATUS_ACTIVE,
-        known_context=context.as_dict(),
+        known_context={
+            **context.as_dict(),
+            # Frozen unconditionally, notes or no notes. With none it is simply
+            # the cached plan copied across -- one JSONB list -- and that is
+            # what stops a *later* session re-planning this version (the
+            # structural-fallback miss at the top of this function replaces the
+            # rows wholesale) from renumbering an interview already in progress.
+            **freeze_ask_plan(questions, set(prefilled)),
+            "prefilled": sorted(prefilled),
+            **({"prefill_degraded": True} if prefill_degraded else {}),
+        },
         filled_values={},
         derived_values={},
         turns=[],
     )
+
+    if notes:
+        # Recorded as a turn so the transcript opens with the user's own words
+        # and a chip per region they produced -- the confirmation surface comes
+        # free from machinery that already exists.
+        #
+        # `kind=TURN_PREFILL` is load-bearing: `answered_count` counts only
+        # answers, so pasting notes cannot consume question 1. The raw text is
+        # kept verbatim whether or not the reader ran, so an outage costs a
+        # re-read rather than a re-paste.
+        record_turn(
+            session,
+            question_id="",
+            question_text=PREFILL_QUESTION_TEXT,
+            answer=notes,
+            extracted=prefilled,
+            kind=TURN_PREFILL,
+            degraded=prefill_degraded,
+        )
+
     db.add(session)
     db.commit()
     db.refresh(session)
 
+    # The frozen list, not the cached one: `covers_regions` is narrowed and
+    # `prefilled_regions` is populated, and every later route reads the same way.
+    questions = session_questions(session, db)
+
     degraded = bool(context.errors or planner_errors)
     summary = (
-        f"{len(context.known)} already correct, {len(context.inferable)} derivable, "
+        (f"{len(prefilled)} filled from your notes, " if prefilled else "")
+        + f"{len(context.known)} already correct, {len(context.inferable)} derivable, "
         f"{len(questions)} question{'s' if len(questions) != 1 else ''} to ask"
         + (" (planned without the model)" if degraded else "")
     )
@@ -309,6 +453,7 @@ def _read_message(
     *,
     asked_regions: list[str],
     question_text: str | None,
+    max_tokens: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[ChipOut], bool, list[str]]:
     """One user message → `(answered, volunteered, chips, degraded, warnings)`.
 
@@ -330,6 +475,7 @@ def _read_message(
         asked_regions,
         also_regions=addressable_ids(schema),
         question_text=question_text,
+        max_tokens=max_tokens,
     )
     labels = _labels(schema)
     chips = [ChipOut(**c) for c in extraction.chips(labels)]
@@ -382,7 +528,7 @@ def answer(
         )
 
     template, version, schema = _context_for(db, session)
-    questions = load_question_plan(db, version.id)
+    questions = session_questions(session, db)
     current = _current(session, questions)
     if current is None:
         raise HTTPException(
@@ -523,7 +669,7 @@ def instruct(
         )
 
     template, version, schema = _context_for(db, session)
-    questions = load_question_plan(db, version.id)
+    questions = session_questions(session, db)
 
     # No asked cluster: every addressable region is equally in play, which is
     # what "obey the instruction" means when nothing was asked.
@@ -541,8 +687,13 @@ def instruct(
         kind=TURN_INSTRUCTION,
         degraded=degraded,
     )
+    # Whatever this supplied, the questions still ahead should stop asking for.
+    # This is what makes "here are my notes" work at any point in the
+    # conversation rather than only before it starts.
+    _narrow_pending(session, questions, set(values) | set(volunteered))
     db.commit()
     db.refresh(session)
+    questions = session_questions(session, db)
 
     logger.info(
         "session %s instruction set %d region(s) on %s",
@@ -568,6 +719,122 @@ def instruct(
     )
 
 
+@router.post("/{session_id}/notes", response_model=AnswerOut)
+async def add_notes(
+    session_id: uuid.UUID,
+    text: str | None = Form(default=None),
+    file: UploadFile | None = File(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AnswerOut:
+    """Hand over prior material: pasted text, or a file to read it out of.
+
+    Separate from `/instruct` because the two are different acts, even though
+    both end in the same extraction. An instruction is the user telling the
+    assistant what a region must contain. This is the user handing over a
+    document and asking it to take what it can -- and a page of minutes is not
+    an answer to "what was the venue?", so it must never be able to consume the
+    question that was on screen when it arrived. Recorded as `TURN_PREFILL`,
+    which `answered_count` does not count.
+
+    Accepts `.txt`, `.md`, `.pdf`, `.docx`, `.xlsx` and `.pptx`. Reading a file
+    is deliberately dumb -- flatten every readable string and discard the
+    structure. This is evidence for a model, not a schema; nothing downstream
+    resolves a locator against it, which is why it can afford to be crude where
+    `app/ingestion/` cannot.
+
+    Available at any point while the session is active, so "here is what I
+    already have" works after the interview has begun as well as before it. The
+    questions still ahead are narrowed by whatever it supplied; the ones already
+    answered are left exactly as they were.
+    """
+    session = _session(db, session_id, user)
+    if session.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This session is {session.status} and no longer takes notes.",
+        )
+
+    source = (text or "").strip()
+    filename = None
+    if file is not None and file.filename:
+        filename = file.filename
+        data = await file.read()
+        if len(data) > settings.max_upload_size_mb * 1024 * 1024:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"That file is larger than {settings.max_upload_size_mb} MB.",
+            )
+        read, problem = extract_note_text(filename, data)
+        if problem:
+            # 422 with the real reason. Accepting it and reporting "nothing
+            # matched a field" would send the user looking for a problem in
+            # their notes when the problem was the file.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem
+            )
+        source = f"{source}\n\n{read}".strip() if source else read
+
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Paste some text or attach a file.",
+        )
+
+    template, version, schema = _context_for(db, session)
+    questions = session_questions(session, db)
+
+    values, volunteered, chips, degraded, warnings = _read_message(
+        schema,
+        source,
+        asked_regions=[],
+        question_text=PREFILL_FRAMING,
+        max_tokens=PREFILL_MAX_TOKENS,
+    )
+    supplied = _writable_values(schema, {**volunteered, **values})
+
+    record_turn(
+        session,
+        question_id="",
+        question_text=(
+            f"{PREFILL_QUESTION_TEXT} ({filename})" if filename else PREFILL_QUESTION_TEXT
+        ),
+        answer=source,
+        extracted=supplied,
+        kind=TURN_PREFILL,
+        degraded=degraded,
+    )
+    _narrow_pending(session, questions, set(supplied))
+    session.known_context = {
+        **(session.known_context or {}),
+        "prefilled": sorted(set((session.known_context or {}).get("prefilled") or []) | set(supplied)),
+    }
+    db.commit()
+    db.refresh(session)
+
+    questions = session_questions(session, db)
+    pending = _current(session, questions)
+    logger.info(
+        "session %s read %d region(s) from %s on %s",
+        session.id,
+        len(supplied),
+        filename or f"{len(source)} characters of pasted text",
+        template.title,
+    )
+
+    return AnswerOut(
+        session_id=session.id,
+        extracted=supplied,
+        volunteered={},
+        chips=chips,
+        derived={},
+        next_question=_question_out(pending) if pending else None,
+        progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
+        degraded=degraded,
+        warnings=warnings,
+    )
+
+
 @router.get("/{session_id}", response_model=SessionOut)
 def get_session(
     session_id: uuid.UUID,
@@ -577,7 +844,7 @@ def get_session(
     """Full state, enough to rebuild the chat screen after a reload."""
     session = _session(db, session_id, user)
     template, version, schema = _context_for(db, session)
-    return _session_out(session, template, load_question_plan(db, version.id), schema)
+    return _session_out(session, template, session_questions(session, db), schema)
 
 
 def _build_spec(
@@ -589,7 +856,7 @@ def _build_spec(
 ):
     """Stage ⑦ over this session's state. Deterministic; no model call."""
     question_of_region: dict[str, str] = {}
-    for question in load_question_plan(db, session.base_version_id):
+    for question in session_questions(session, db):
         for region_id in question.covers_regions:
             question_of_region[region_id] = question.question_id
 
@@ -607,7 +874,80 @@ def _build_spec(
         tier=session.tier,
         intent=session.user_intent,
         question_of_region=question_of_region,
+        context_regions=_context_regions(session, overrides),
     )
+
+
+def _narrow_pending(
+    session: GenerationSession, questions: list[PlannedQuestion], supplied: set[str]
+) -> None:
+    """Move newly-supplied regions out of the questions still ahead.
+
+    Pasting notes halfway through should stop the assistant asking for what was
+    just handed to it. Only questions the user has not yet reached are touched,
+    and no question is removed -- the list keeps its length and its order, so
+    `_current`'s positional pointer cannot move and `answered_count` still lines
+    up with it.
+
+    Questions already answered are left exactly as they were. Rewriting one
+    would change which regions `_skipped_regions` holds back from the deriver,
+    retroactively, for a decision the user made against different wording.
+    """
+    rows = (session.known_context or {}).get("ask_plan")
+    if not isinstance(rows, list) or not supplied:
+        return
+
+    start = answered_count(session)
+    changed = False
+    updated = list(rows)
+    for index in range(start, len(updated)):
+        row = updated[index]
+        if not isinstance(row, dict):
+            continue
+        covers = list(row.get("covers_regions") or [])
+        moved = [r for r in covers if r in supplied]
+        if not moved:
+            continue
+        updated[index] = {
+            **row,
+            "covers_regions": [r for r in covers if r not in supplied],
+            "prefilled_regions": list(row.get("prefilled_regions") or []) + moved,
+        }
+        changed = True
+
+    if changed:
+        # Reassigned, not mutated: SQLAlchemy does not track mutation inside a
+        # JSONB value and an in-place edit is discarded on commit.
+        session.known_context = {**(session.known_context or {}), "ask_plan": updated}
+
+
+def _context_regions(
+    session: GenerationSession, overrides: dict[str, Any] | None = None
+) -> set[str]:
+    """Regions still holding a value lifted from the pasted notes.
+
+    Badged "From your notes" rather than "Typed", because those are different
+    claims. A value the user typed is theirs; a value read out of a forwarded
+    email is a machine's reading of somebody else's document, and on a screen
+    whose whole job is showing where content came from, rendering the two
+    identically is a lie of omission.
+
+    The subtraction is what keeps it honest over time: a region the user has
+    since answered, corrected in an instruction, or edited on the review screen
+    is no longer from the notes, so the badge reverts. The notes turn itself is
+    excluded from that subtraction -- it is the source, not a correction of it.
+    """
+    prefilled = set((session.known_context or {}).get("prefilled") or [])
+    if not prefilled:
+        return set()
+
+    corrected = set(overrides or {})
+    for turn in session.turns or []:
+        if turn.get("kind") == TURN_PREFILL:
+            continue
+        corrected |= set(turn.get("extracted") or {})
+        corrected |= set(turn.get("volunteered") or {})
+    return prefilled - corrected
 
 
 @router.get("/{session_id}/spec", response_model=SpecOut)
@@ -847,4 +1187,4 @@ def abandon_session(
     db.refresh(session)
 
     template, version, schema = _context_for(db, session)
-    return _session_out(session, template, load_question_plan(db, version.id), schema)
+    return _session_out(session, template, session_questions(session, db), schema)

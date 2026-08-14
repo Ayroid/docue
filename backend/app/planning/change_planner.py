@@ -57,7 +57,7 @@ from app.schemas.change_spec import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PlannedChange", "plan_change_spec"]
+__all__ = ["PlannedChange", "plan_change_spec", "writes_cleanly"]
 
 # kind -> the op that writes it. Absence means "not writable from a
 # conversation", which is the fail-safe default from plan Appendix A.
@@ -173,6 +173,22 @@ def _op_for(fmt: str, region: Any, value: Any, provenance: str) -> Any | None:
     return None
 
 
+def writes_cleanly(fmt: str, region: Any, value: Any) -> bool:
+    """Would this value actually produce an operation for this region?
+
+    The same lookup `_op_for` performs, exposed so a caller can ask *before*
+    committing to a value rather than discovering at compile time that it was
+    dropped. Sharing the implementation is the point: a second opinion written
+    somewhere else would eventually disagree with the one that does the work.
+
+    Used by the notes reader, where the answer decides whether a region counts
+    as supplied. A list of rows aimed at a date cell produces no operation, so
+    it must not be allowed to stand in for an answer -- otherwise the question
+    that would have collected a real one is marked as already handled.
+    """
+    return _op_for(fmt, region, value, "probe") is not None
+
+
 def plan_change_spec(
     schema: Any,
     filled_values: dict[str, Any],
@@ -182,6 +198,7 @@ def plan_change_spec(
     tier: str = "T2",
     intent: str | None = None,
     question_of_region: dict[str, str] | None = None,
+    context_regions: set[str] | None = None,
 ) -> PlannedChange:
     """Build the Change Spec. Deterministic, and never raises.
 
@@ -196,12 +213,22 @@ def plan_change_spec(
     skipped: list[dict[str, str]] = []
 
     # (region_id, value, provenance), typed first so it wins on collision.
+    #
+    # Three roots, narrowest first. `user_answer:q3` is a value given in reply to
+    # a specific question. `user_context` is one read out of text the user
+    # pasted -- still theirs, still outranking derivation, but not something
+    # they wrote in answer to anything, and the review screen says so. Bare
+    # `user_answer` is everything else: an instruction, a review-screen edit.
     candidates: list[tuple[str, Any, str]] = []
     for region_id, value in (filled_values or {}).items():
         question = (question_of_region or {}).get(region_id)
-        candidates.append(
-            (region_id, value, f"user_answer:{question}" if question else "user_answer")
-        )
+        if question:
+            provenance = f"user_answer:{question}"
+        elif region_id in (context_regions or set()):
+            provenance = "user_context"
+        else:
+            provenance = "user_answer"
+        candidates.append((region_id, value, provenance))
     seen = {rid for rid, _, _ in candidates}
     for region_id, wrapped in (derived_values or {}).items():
         if region_id in seen:

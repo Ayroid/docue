@@ -28,6 +28,15 @@ class QuestionOut(BaseModel):
     hint: str | None = None
     example: str | None = None
     covers_regions: list[str] = Field(default_factory=list)
+    prefilled_regions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Regions this question was planned for that the user's pasted notes already "
+            "supplied. Removed from `covers_regions`; surfaced so the screen can say "
+            "what it already has instead of appearing to ask twice. An empty "
+            "`covers_regions` with entries here means the notes answered all of it."
+        ),
+    )
 
 
 class ProgressOut(BaseModel):
@@ -73,6 +82,16 @@ class SessionCreate(BaseModel):
     )
     intent: str | None = Field(
         default=None, description="What the user is trying to produce, in their words."
+    )
+    notes: str | None = Field(
+        default=None,
+        max_length=20000,
+        description=(
+            "Anything the user already has in writing -- meeting notes, an email, a "
+            "brief. Whatever it supplies is filled in before the first question is "
+            "asked; whatever it does not supply is still asked about. Distinct from "
+            "`intent`, which is one line on what they are making."
+        ),
     )
     tier: Tier = "T2"
 
