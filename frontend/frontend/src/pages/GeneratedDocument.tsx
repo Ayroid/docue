@@ -1,10 +1,9 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { statusClass } from '@/data/catalog'
-import { VERSIONS } from '@/data/demo'
+
 import { useHub } from '@/store/HubProvider'
 import { initialsOf } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 import { Avatar, DemoBadge, EmptyState, FormatChip, PageBody, PreviewLines } from '@/components/common'
 import { DownloadIcon, GenerateIcon } from '@/components/icons'
@@ -72,22 +71,10 @@ export function GeneratedDocument() {
             </div>
           </Panel>
 
-          <Panel>
-            <SectionLabel>Version timeline</SectionLabel>
-            <div className="flex flex-col gap-[10px]">
-              {VERSIONS.slice(0, 2).map((v, i) => (
-                <div key={v.n} className="flex items-start gap-3">
-                  <Tag variant={i === 0 ? 'accent' : 'neutral'} className="whitespace-nowrap flex-none">
-                    v{v.n}
-                  </Tag>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] opacity-55">{v.when} · {v.author}</div>
-                    <div className="text-[13px]">{v.note}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Panel>
+          {/* The version timeline that used to sit here listed four invented
+              revisions with invented authors and notes, on a page about a real
+              generated document. There is no versions endpoint yet, so it is
+              gone rather than fabricated. */}
 
           <div className="flex flex-col gap-[10px]">
             <Button

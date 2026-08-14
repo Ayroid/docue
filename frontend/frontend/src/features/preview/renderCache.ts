@@ -21,48 +21,34 @@ export function clearRenderCache() {
 }
 
 /**
- * Backend contract:
+ * Backend contract, once it exists:
  *   GET /api/v1/render/{key}  →  { pngUrl, renderedInMs }
  *
- * The backend runs `soffice --headless --convert-to pdf` with a per-invocation
- * `-env:UserInstallation` and a timeout (Implementation Plan §11), then rasterises
- * page 1. Until that endpoint exists, `simulateRender` stands in with the same
- * shape and a representative 1–3s latency, so the swap-in behaviour on the
- * fill screen is exercised for real.
+ * The backend would run `soffice --headless --convert-to pdf` with a
+ * per-invocation `-env:UserInstallation` and a timeout (Implementation Plan
+ * §11), then rasterise page 1.
+ *
+ * **There is no such endpoint yet.** This used to stand in with a simulated
+ * 1–3s latency that resolved to a `render://` URL with no bytes behind it, and
+ * the preview pane then reported "Exact layout · rendered in 1400ms" — a
+ * measured-sounding claim about a render that never happened. It now rejects,
+ * so the pane says it is showing structure only, which is true. The cache and
+ * the in-flight dedupe below are kept because they are the parts that will
+ * matter the moment the endpoint lands.
  */
-async function simulateRender(key: string, signal?: AbortSignal): Promise<RenderResult> {
-  const started = performance.now()
-  const latency = 1100 + (parseInt(key.slice(0, 2), 16) / 255) * 900
-
-  await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, latency)
-    signal?.addEventListener('abort', () => {
-      clearTimeout(t)
-      reject(new DOMException('Render superseded', 'AbortError'))
-    })
-  })
-
-  return { key, pngUrl: `render://${key}`, renderedInMs: Math.round(performance.now() - started) }
+export class RendererUnavailable extends Error {
+  constructor() {
+    super('The exact renderer is not wired up yet.')
+    this.name = 'RendererUnavailable'
+  }
 }
 
-export function requestRender(key: string, signal?: AbortSignal): Promise<RenderResult> {
+export function requestRender(key: string, _signal?: AbortSignal): Promise<RenderResult> {
   const hit = cache.get(key)
   if (hit) return Promise.resolve(hit)
 
   const pending = inflight.get(key)
   if (pending) return pending
 
-  const p = simulateRender(key, signal)
-    .then((result) => {
-      cache.set(key, result)
-      inflight.delete(key)
-      return result
-    })
-    .catch((err) => {
-      inflight.delete(key)
-      throw err
-    })
-
-  inflight.set(key, p)
-  return p
+  return Promise.reject(new RendererUnavailable())
 }

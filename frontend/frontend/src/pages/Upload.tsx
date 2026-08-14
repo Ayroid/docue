@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { CATS, type Fmt } from '@/data/catalog'
 import { useHub } from '@/store/HubProvider'
 import { useAuth } from '@/store/AuthProvider'
@@ -42,6 +42,10 @@ function formatFromFileName(name: string): TemplateFormat | null {
  */
 export function Upload() {
   const navigate = useNavigate()
+  /* `?template=` turns this page into "upload the next version of that
+     template" — the file half of the Update template choice. */
+  const [searchParams] = useSearchParams()
+  const updatingTemplateId = searchParams.get('template')
   const { addUpload, fireToast } = useHub()
   const { isAdmin } = useAuth()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -113,7 +117,7 @@ export function Upload() {
       /* 202 with a job id — the file is stored and region detection is queued.
          The template row exists by then, so read it back for the real title,
          format and size rather than describing the row from the picked file. */
-      const accepted = await uploadTemplate(file)
+      const accepted = await uploadTemplate(file, updatingTemplateId ?? undefined)
       const templateId = uploadedTemplateId(accepted)
       if ('job_id' in accepted) setTracking({ templateId, jobId: accepted.job_id })
       const stored = await getTemplate(templateId).catch(() => null)
@@ -148,11 +152,17 @@ export function Upload() {
           a review would describe a step that does not happen and leave them
           waiting on a queue their own file never enters. */}
       <PageHeading
-        title="Upload template"
+        title={updatingTemplateId ? 'Upload a new version' : 'Upload template'}
         subtitle={
-          isAdmin
-            ? 'Your uploads are published straight to the library — no review step.'
-            : 'An admin reviews every submission before it appears in Discovery.'
+          // A *new version* is pending for everyone, admins included: the API
+          // auto-approves an admin's new template, not their replacement of an
+          // existing one. Telling an admin their version skips review would
+          // describe a step that does not happen to it.
+          updatingTemplateId
+            ? 'This replaces the template once doc control approves it. Until then the library keeps serving the current version.'
+            : isAdmin
+              ? 'Your uploads are published straight to the library — no review step.'
+              : 'An admin reviews every submission before it appears in Discovery.'
         }
       />
 

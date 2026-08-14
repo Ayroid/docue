@@ -12,6 +12,7 @@ import { Discovery } from '@/pages/Discovery'
 import { DocumentLibrary } from '@/pages/DocumentLibrary'
 import { DocumentViewer } from '@/pages/DocumentViewer'
 import { Results } from '@/pages/Results'
+import { UpdateTemplate } from '@/pages/UpdateTemplate'
 import { TemplateDetail } from '@/pages/TemplateDetail'
 import { Generate } from '@/pages/Generate'
 import { Review } from '@/pages/Review'
@@ -85,6 +86,7 @@ export function App() {
         <Route path="/library" element={<DocumentLibrary />} />
         <Route path="/search" element={<Results />} />
         <Route path="/templates/:id" element={<TemplateDetail />} />
+        <Route path="/templates/:id/update" element={<UpdateTemplate />} />
         <Route path="/templates/:id/generate" element={<Generate />} />
         <Route path="/generate/:sessionId/review" element={<Review />} />
         <Route path="/documents" element={<MyDocuments />} />

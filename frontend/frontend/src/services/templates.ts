@@ -1,7 +1,7 @@
 /**
- * Client for the real `/api/v1/templates` endpoints. Upload, list,
- * fetch-by-id and download are the routes that exist on the backend today;
- * search, versions and delete aren't built yet.
+ * Client for the real `/api/v1` endpoints: upload, ingestion-job status, list,
+ * fetch-by-id, regions, download, and search. Versions and delete aren't built
+ * on the backend yet.
  */
 
 /* Relative on purpose: Vite proxies `/api` to the backend (see `vite.config.ts`),
@@ -120,7 +120,19 @@ export function uploadedTemplateId(result: UploadAccepted | TemplateOut): string
   return 'template_id' in result ? result.template_id : result.id
 }
 
-export async function uploadTemplate(file: File): Promise<UploadAccepted | TemplateOut> {
+/**
+ * Upload a file.
+ *
+ * With `templateId` it becomes that template's next version rather than a new
+ * template — same gate, same ingestion, same queue, but no new row in the
+ * library. The server refuses a file of a different type: a template's format
+ * is part of its identity, and every document ever generated from it assumes
+ * one.
+ */
+export async function uploadTemplate(
+  file: File,
+  templateId?: string,
+): Promise<UploadAccepted | TemplateOut> {
   const form = new FormData()
   form.append('file', file)
 
@@ -128,11 +140,14 @@ export async function uploadTemplate(file: File): Promise<UploadAccepted | Templ
   try {
     /* No Content-Type header: the browser has to set it itself so it can add
        the multipart boundary. Only the Authorization header is ours. */
-    res = await fetch(`${API_BASE_URL}/templates`, {
-      method: 'POST',
-      headers: { ...authHeader() },
-      body: form,
-    })
+    res = await fetch(
+      templateId ? `${API_BASE_URL}/templates/${templateId}/versions` : `${API_BASE_URL}/templates`,
+      {
+        method: 'POST',
+        headers: { ...authHeader() },
+        body: form,
+      },
+    )
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
@@ -176,6 +191,74 @@ export async function getTemplate(id: string): Promise<TemplateOut> {
 
   if (!res.ok) {
     const message = res.status === 404 ? 'Template not found.' : ((await detailOf(res)) ?? `Lookup failed (${res.status}).`)
+    throw new TemplateApiError(res.status, message)
+  }
+
+  return res.json()
+}
+
+/* ── the document schema ────────────────────────────────────────────────── */
+
+/** One detected region. Field-for-field the backend's `RegionOut` (contract C3). */
+export interface RegionOut {
+  region_id: string
+  kind: string
+  label: string | null
+  /** What the region is *for*, written by the classifier. Null until enrichment runs. */
+  semantic_role: string | null
+  value_type: string | null
+  /** Polymorphic: `{sheet, ref}` | `{para_index, run_span}` | `{slide_index, shape_id}`. */
+  locator: Record<string, unknown>
+  current_content: string | null
+  editable: boolean
+  protected: boolean
+  required: boolean
+  detection_method: string
+  question_group: number | null
+  /** The detector's own numbering — restarts per sheet, so never sort by it. */
+  ordinal: number
+  /** Position within the whole document. Sort by this. */
+  sequence: number
+  notes: Record<string, unknown> | null
+}
+
+export interface DocumentSchemaOut {
+  template_id: string
+  version_id: string
+  format: TemplateFormat
+  detector_version: string
+  regions_detected: number
+  regions_writable: number
+  counts_by_kind: Record<string, number>
+  form_id: string | null
+  house_pattern: string | null
+  /** The `Ver.` the document claims about itself, from its own revision block. */
+  in_doc_version: string | null
+  created_at: string
+  regions: RegionOut[]
+}
+
+/**
+ * The persisted Document Schema for a version.
+ *
+ * A 404 here is routine rather than exceptional: the schema is written at the
+ * end of ingestion, so a template uploaded seconds ago legitimately has none
+ * yet. Callers should poll the ingestion job rather than treat it as an error.
+ */
+export async function getTemplateRegions(id: string, versionId?: string): Promise<DocumentSchemaOut> {
+  const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : ''
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/templates/${id}/regions${query}`)
+  } catch {
+    throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
+  }
+
+  if (!res.ok) {
+    const message =
+      res.status === 404
+        ? 'No region schema for this version yet — ingestion may still be running.'
+        : ((await detailOf(res)) ?? `Region lookup failed (${res.status}).`)
     throw new TemplateApiError(res.status, message)
   }
 

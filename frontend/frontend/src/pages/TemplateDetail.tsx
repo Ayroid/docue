@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/common'
+import { VersionHistory } from '@/components/VersionHistory'
 import { Icon } from '@/components/ui/icon'
 import { DocumentPreviewSkeleton, Skeleton, SkeletonGroup } from '@/components/ui/skeleton'
 import { DownloadIcon } from '@/components/icons'
@@ -255,7 +256,25 @@ export function TemplateDetail() {
                 </div>
               ))}
             </div>
+
+            {/* Directly under the metadata it acts on: this changes what the
+                facts above will say. It leads to a choice rather than doing
+                anything, so it is a secondary button and says "Update", not
+                "Upload" or "Edit" — either of those would name one of the two
+                routes and hide the other. */}
+            <Button
+              variant="secondary"
+              block
+              className="mt-5 whitespace-nowrap"
+              onClick={() => navigate(`/templates/${doc.id}/update`)}
+            >
+              <Icon name="edit_document" size={18} />
+              Update document
+            </Button>
           </div>
+
+          {/* Every version of this template, with what each one changed. */}
+          <VersionHistory templateId={doc.id} />
         </div>
       </div>
     </PageBody>
