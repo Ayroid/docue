@@ -51,6 +51,8 @@ REQUIRED_ASSETS: dict[str, list[str]] = {
     # the fixture below.
     "test_pptx_pipeline": [CORPORATE_DECK],
     "test_ingestion_pipeline": [MOM, BFL, POC, BRD],
+    # The deck here is the generated template, built by the fixture below.
+    "test_conversation": [MOM, BRD],
 }
 
 SUITE_TIMEOUT_SECONDS = 300

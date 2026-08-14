@@ -140,14 +140,35 @@ def check_guarantees(schema, original: bytes) -> list[str]:
     except dc.ProtectedWriteError:
         pass
 
-    # The bridge won't even build an op for a non-editable region.
-    title = next((r for r in schema.regions if r.kind == "title"), None)
-    if title is not None:
+    # The bridge won't even build an op for a non-editable region. `history` is
+    # the exemplar: it is written by publishing, never by a caller.
+    #
+    # This used to test `title`, which is now editable on purpose -- "change the
+    # heading to Q3 Review" is a reasonable instruction and used to be
+    # unexpressible. What keeps a heading from being *invented* is
+    # `app.conversation.scope.askable`, which holds it out of the interview and
+    # away from the deriver, not a closed door in the compiler.
+    locked = next(
+        (r for r in schema.regions if not r.editable and not r.protected), None
+    )
+    if locked is not None:
         try:
-            dc.set_field(schema, title.region_id, "overwritten")
-            failures.append("set_field built an op for a title region")
+            dc.set_field(schema, locked.region_id, "overwritten")
+            failures.append(f"set_field built an op for {locked.kind} {locked.region_id}")
         except dc.RegionNotEditableError:
             pass
+
+    # ...and it does build one for a heading, which is the point of the change.
+    title = next(
+        (r for r in schema.regions if r.kind == "title" and r.editable), None
+    )
+    if title is None:
+        failures.append("no editable title region; 'change the heading' cannot work")
+    else:
+        try:
+            dc.set_field(schema, title.region_id, "Q3 Review")
+        except (dc.RegionNotEditableError, dc.UnknownRegionError) as exc:
+            failures.append(f"set_field refused an editable heading: {exc}")
 
     # An invented region_id is refused rather than guessed at.
     try:
