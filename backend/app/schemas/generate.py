@@ -87,6 +87,10 @@ class CompileResponse(BaseModel):
     # Present only on a committed run.
     result_version_id: uuid.UUID | None = None
     result_version_number: int | None = None
+    # Set instead of `result_version_id` when the compile produced somebody's
+    # document rather than a candidate revision. Exactly one of the two is ever
+    # non-null; both are null on a dry run or a failure.
+    result_document_id: uuid.UUID | None = None
     download_url: str | None = None
     qa_run_id: uuid.UUID | None = None
     created_at: datetime | None = None

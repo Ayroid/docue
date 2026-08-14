@@ -2,6 +2,7 @@ from app.models.change_spec import ChangeSpecRow
 from app.models.document_region import DocumentRegion
 from app.models.document_schema import DocumentSchemaRow
 from app.models.email_otp import EmailOtp
+from app.models.generated_document import GeneratedDocument
 from app.models.generation_session import GenerationSession
 from app.models.job import Job
 from app.models.notification import Notification
@@ -16,6 +17,7 @@ __all__ = [
     "DocumentRegion",
     "DocumentSchemaRow",
     "EmailOtp",
+    "GeneratedDocument",
     "GenerationSession",
     "Job",
     "Notification",

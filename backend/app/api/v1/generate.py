@@ -44,6 +44,7 @@ from app.models.change_spec import (
     ChangeSpecRow,
 )
 from app.models.qa_run import OVERALL_FAIL, OVERALL_PASS, QaRun
+from app.models.generated_document import GeneratedDocument
 from app.models.template import Template
 from app.models.template_version import APPROVAL_APPROVED, TemplateVersion
 from app.models.user import ROLE_ADMIN, User
@@ -60,6 +61,11 @@ router = APIRouter(prefix="/templates", tags=["generation"])
 # original store to be distinct from generated artifacts, and `originals/` is
 # write-once; a derived version must never land there.
 GENERATED_PREFIX = "generated"
+
+# Documents are not versions and do not live among them. A separate prefix keeps
+# "everything under generated/ is a candidate template revision" true, which is
+# what makes an S3 listing readable without the database next to it.
+DOCUMENT_PREFIX = "documents"
 
 
 def _load(db: Session, template_id: uuid.UUID, version_id: uuid.UUID | None) -> tuple[Template, TemplateVersion]:
@@ -110,6 +116,10 @@ def compile_change_spec_endpoint(
         request.spec,
         dry_run=request.dry_run,
         publish=request.publish,
+        # This route is addressed by template and version and exists to revise a
+        # template, so it says so. The conversation's commit defaults the other
+        # way -- see `sessions.py`.
+        as_version=True,
         user=user,
         background_tasks=background_tasks,
     )
@@ -123,11 +133,25 @@ def compile_and_store(
     *,
     dry_run: bool,
     publish: bool = False,
+    as_version: bool = False,
+    title: str | None = None,
     user: User,
     background_tasks: BackgroundTasks | None = None,
     session_id: uuid.UUID | None = None,
 ) -> CompileResponse:
     """Apply a Change Spec to a stored version. **The only path to bytes.**
+
+    **`as_version` decides what the bytes become, and it is asked, not guessed.**
+    False -- the default -- produces a `generated_documents` row: somebody's
+    document, with no version number, no place in the approval queue and no
+    claim on the template. True produces a `template_versions` row that says
+    "this should be the next revision of the form", and goes to doc control.
+
+    Everything compiled used to be the second thing, and the damage was not
+    theoretical: a form reached v7 because six people made minutes from it, and
+    one template in this database was replaced by a filled-in copy of itself.
+    A document and a revision are different claims, so the caller states which
+    one they are making.
 
     Both the endpoint above and the session endpoints in `app/api/v1/sessions.py`
     come through here, and that is deliberate rather than tidy. This function is
@@ -204,15 +228,26 @@ def compile_and_store(
     spec_row.dropped = [d.as_dict() for d in result.dropped]
 
     result_version: TemplateVersion | None = None
+    result_document: GeneratedDocument | None = None
     storage_key: str | None = None
 
     # QA is a gate, not a report: bytes that failed it are never stored, even on
     # an explicit non-dry-run request.
     if not dry_run and result.passed:
-        number = _next_version_number(db, template.id)
         suffix = version.storage_key.rsplit(".", 1)[-1]
-        filename = f"{template.title} v{number}.{suffix}"
-        storage_key = f"{GENERATED_PREFIX}/{template.id}/v{number}/{filename}"
+        # A version consumes the template's next number; a document consumes
+        # nothing. Keyed by its own id rather than a counter, because two people
+        # generating minutes from the same form at the same moment are not
+        # competing for a slot -- and a counter would make them think they were.
+        number = _next_version_number(db, template.id) if as_version else None
+        if as_version:
+            filename = f"{template.title} v{number}.{suffix}"
+            storage_key = f"{GENERATED_PREFIX}/{template.id}/v{number}/{filename}"
+        else:
+            document_id = uuid.uuid4()
+            filename = f"{template.title}.{suffix}"
+            storage_key = f"{DOCUMENT_PREFIX}/{template.id}/{document_id}/{filename}"
+
         try:
             upload_file(io.BytesIO(result.data), storage_key, version.mime_type)
         except RuntimeError as exc:
@@ -220,42 +255,60 @@ def compile_and_store(
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
         try:
-            result_version = TemplateVersion(
-                id=uuid.uuid4(),
-                template_id=template.id,
-                version_number=number,
-                parent_version_id=version.id,
-                storage_bucket=settings.s3_bucket_name,
-                storage_key=storage_key,
-                file_hash=hashlib.sha256(result.data).hexdigest(),
-                size_bytes=len(result.data),
-                mime_type=version.mime_type,
-                # Carried forward: the document still claims the same `Ver.` in
-                # its own revision block until publish writes back to it.
-                in_doc_version=version.in_doc_version,
-                # A compiled version is a new, unreviewed document, so it enters
-                # the queue like any upload. It does *not* inherit the base
-                # version's approval: doing so would make compile-then-publish a
-                # way to change what the library serves without review, which is
-                # the whole thing the gate exists to stop.
-                submitted_by=user.id,
-            )
-            db.add(result_version)
-            db.flush()
-            spec_row.result_version_id = result_version.id
+            if as_version:
+                result_version = TemplateVersion(
+                    id=uuid.uuid4(),
+                    template_id=template.id,
+                    version_number=number,
+                    parent_version_id=version.id,
+                    storage_bucket=settings.s3_bucket_name,
+                    storage_key=storage_key,
+                    file_hash=hashlib.sha256(result.data).hexdigest(),
+                    size_bytes=len(result.data),
+                    mime_type=version.mime_type,
+                    # Carried forward: the document still claims the same `Ver.`
+                    # in its own revision block until publish writes back to it.
+                    in_doc_version=version.in_doc_version,
+                    # A submitted revision is unreviewed, so it enters the queue
+                    # like any upload. It does *not* inherit the base version's
+                    # approval: that would make compile-then-publish a way to
+                    # change what the library serves without review, which is
+                    # the whole thing the gate exists to stop.
+                    submitted_by=user.id,
+                )
+                db.add(result_version)
+                db.flush()
+                spec_row.result_version_id = result_version.id
+                if publish:
+                    # Pointing `current_version_id` at a pending version takes
+                    # the template out of the library until an admin approves
+                    # it. Deliberate: "publish" means submit for publication.
+                    template.current_version_id = result_version.id
+            else:
+                result_document = GeneratedDocument(
+                    id=document_id,
+                    template_id=template.id,
+                    base_version_id=version.id,
+                    session_id=session_id,
+                    change_spec_id=spec_row.id,
+                    title=title or template.title,
+                    storage_bucket=settings.s3_bucket_name,
+                    storage_key=storage_key,
+                    file_hash=hashlib.sha256(result.data).hexdigest(),
+                    size_bytes=len(result.data),
+                    mime_type=version.mime_type,
+                    created_by=user.id,
+                )
+                db.add(result_document)
+                db.flush()
+                spec_row.result_document_id = result_document.id
             spec_row.status = STATUS_COMMITTED
-            if publish:
-                # Pointing `current_version_id` at a pending version takes the
-                # template out of the library until an admin approves it. That
-                # is deliberate and is what "publish" now means: submit for
-                # publication, not publish.
-                template.current_version_id = result_version.id
         except Exception as exc:  # noqa: BLE001
             db.rollback()
             delete_file(storage_key)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to record the compiled version.",
+                detail="Failed to record the compiled output.",
             ) from exc
     else:
         spec_row.status = STATUS_COMPILED if result.passed else STATUS_FAILED
@@ -317,9 +370,12 @@ def compile_and_store(
         duration_ms=result.duration_ms,
         result_version_id=result_version.id if result_version else None,
         result_version_number=result_version.version_number if result_version else None,
+        result_document_id=result_document.id if result_document else None,
         download_url=(
             f"/api/v1/templates/{template.id}/versions/{result_version.id}/download"
             if result_version
+            else f"/api/v1/documents/{result_document.id}/download"
+            if result_document
             else None
         ),
         qa_run_id=qa_run.id,

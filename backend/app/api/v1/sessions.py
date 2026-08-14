@@ -601,9 +601,14 @@ def compile_session(
         planned.spec,
         dry_run=request.dry_run,
         publish=request.publish,
+        # **The conversation produces a document unless asked otherwise.**
+        # Filling a form's fields makes a document, not a better form, and the
+        # default has to be the common case: most sessions are one person making
+        # one thing for themselves. `submit_as_version` is the review screen's
+        # "make this the template" and is what puts it in front of doc control.
+        as_version=request.submit_as_version,
+        title=session.user_intent,
         session_id=session.id,
-        # The version this mints is a submission like any upload: it names its
-        # author and, once stored, notifies doc control that it needs reviewing.
         user=user,
         background_tasks=background_tasks,
     )
@@ -633,7 +638,10 @@ def commit_session(
     return compile_session(
         session_id,
         SessionCompileIn(
-            dry_run=False, publish=request.publish, overrides=request.overrides
+            dry_run=False,
+            submit_as_version=request.submit_as_version,
+            publish=request.publish,
+            overrides=request.overrides,
         ),
         background_tasks,
         user,

@@ -154,9 +154,20 @@ class SessionCompileIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dry_run: bool = True
+    submit_as_version: bool = Field(
+        default=False,
+        description=(
+            "Put the result forward as the template's next version, for doc control to "
+            "review. Off by default: a session produces the caller's own document, which "
+            "is not a revision of the form it was made from."
+        ),
+    )
     publish: bool = Field(
         default=False,
-        description="Point the template's current version at the result. Off by default.",
+        description=(
+            "Also point the template's current version at the result while it awaits "
+            "review. Only meaningful with `submit_as_version`."
+        ),
     )
     overrides: dict[str, Any] = Field(
         default_factory=dict,

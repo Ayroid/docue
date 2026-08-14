@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, optional_user
@@ -239,6 +240,137 @@ def _announce_submission(
         logger.exception("Failed to announce version %s for approval", version_id)
     finally:
         db.close()
+
+
+@router.post(
+    "/{template_id}/versions",
+    response_model=IngestionAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_new_version(
+    template_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> IngestionAccepted:
+    """Upload a replacement file as this template's next version.
+
+    The other half of "update this template", beside revising it through the
+    conversation. Same gate, same ingestion, same notification as a first upload
+    -- the only difference is that no `Template` row is created, because this is
+    a revision of one that exists rather than a new thing in the library.
+
+    **The format must match.** A template's identity includes what kind of file
+    it is: its regions, its compiler and every document ever generated from it
+    assume one. Replacing a workbook with a deck is a new template, not a new
+    version, and saying so here is kinder than letting the region detector
+    discover it later.
+
+    `current_version_id` is deliberately *not* moved. The new version is pending,
+    and pointing the template at it would take the template out of the library
+    until an admin approves -- which is a decision for whoever approves, not for
+    whoever uploads.
+    """
+    template = db.get(Template, template_id)
+    if template is None or template.status == "deleted":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type '{ext or 'unknown'}'. Only .xlsx, .docx, .pptx are allowed.",
+        )
+    fmt = ALLOWED_FORMATS[ext]
+    if fmt != template.format:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"This template is a .{template.format} file, and a version of it must be "
+                f"one too. Upload a .{fmt} as a new template instead."
+            ),
+        )
+
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    buffer = io.BytesIO()
+    hasher = hashlib.sha256()
+    size = 0
+    while chunk := await file.read(1024 * 1024):
+        size += len(chunk)
+        if size > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File exceeds the {settings.max_upload_size_mb}MB upload limit.",
+            )
+        hasher.update(chunk)
+        buffer.write(chunk)
+
+    if size == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    payload = buffer.getvalue()
+    if payload[:4] != ZIP_MAGIC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not look like a valid Office Open XML document.",
+        )
+    buffer.seek(0)
+
+    number = (
+        db.query(func.max(TemplateVersion.version_number))
+        .filter(TemplateVersion.template_id == template_id)
+        .scalar()
+        or 0
+    ) + 1
+    version_id = uuid.uuid4()
+    storage_key = f"originals/{template_id}/v{number}/{file.filename}"
+
+    try:
+        upload_file(buffer, storage_key, MIME_TYPES[fmt])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    try:
+        version = TemplateVersion(
+            id=version_id,
+            template_id=template_id,
+            version_number=number,
+            parent_version_id=template.current_version_id,
+            storage_bucket=settings.s3_bucket_name,
+            storage_key=storage_key,
+            file_hash=hasher.hexdigest(),
+            size_bytes=size,
+            mime_type=MIME_TYPES[fmt],
+            approval_status=APPROVAL_PENDING,
+            submitted_by=user.id,
+        )
+        db.add(version)
+        db.flush()
+        job = enqueue_ingestion(db, version_id)
+        job_id = job.id
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        delete_file(storage_key)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record the new version.",
+        ) from exc
+
+    background_tasks.add_task(run_ingestion_job, job_id, template_id, version_id, payload)
+    background_tasks.add_task(
+        _announce_submission, template_id, version_id, template.title, user.id
+    )
+
+    logger.info(
+        "template %s received v%s by upload from %s", template_id, number, user.id
+    )
+    return IngestionAccepted(
+        template_id=template_id,
+        version_id=version_id,
+        job_id=job_id,
+        status="ingesting",
+    )
 
 
 @router.get("", response_model=list[TemplateOut])

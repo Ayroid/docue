@@ -61,6 +61,13 @@ class ChangeSpecRow(Base):
     result_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("template_versions.id", ondelete="SET NULL"), nullable=True
     )
+    # The other kind of result. A compile produces one or the other, never both:
+    # a template revision lands in `template_versions`, and everything else is
+    # somebody's document. Which one it was is the caller's declared intent, not
+    # something inferred after the fact -- see `compile_and_store`.
+    result_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("generated_documents.id", ondelete="SET NULL"), nullable=True
+    )
     spec_version: Mapped[str] = mapped_column(String(10), nullable=False)
     spec_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     operation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
