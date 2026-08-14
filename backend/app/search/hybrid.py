@@ -52,6 +52,19 @@ _TSVECTOR = """
     setweight(to_tsvector('english', coalesce(category, '')), 'C')
 """
 
+# Unapproved templates are invisible to search, exactly as they are to
+# `GET /templates`. Written as a correlated EXISTS rather than a join so it can
+# be dropped into both halves unchanged, and so neither query grows a row per
+# version. An approval gate that only covered the library listing would be no
+# gate at all: the search box is how anyone actually finds a template.
+_APPROVED = """
+  AND EXISTS (
+        SELECT 1 FROM template_versions v
+        WHERE v.id = templates.current_version_id
+          AND v.approval_status = 'approved'
+  )
+"""
+
 _LEXICAL_SQL = f"""
 SELECT id::text AS id,
        ts_rank_cd({_TSVECTOR}, plainto_tsquery('english', :q)) AS score,
@@ -63,16 +76,18 @@ SELECT id::text AS id,
 FROM templates
 WHERE status = 'active'
   AND ({_TSVECTOR}) @@ plainto_tsquery('english', :q)
+  {_APPROVED}
 ORDER BY score DESC
 LIMIT :n
 """
 
 # `<=>` is cosine distance, so 1 - distance is similarity. Ordering by the
 # operator (not by the expression) is what lets the HNSW index serve the query.
-_VECTOR_SQL = """
+_VECTOR_SQL = f"""
 SELECT id::text AS id, 1 - (embedding <=> CAST(:qv AS vector)) AS score
 FROM templates
 WHERE status = 'active' AND embedding IS NOT NULL
+  {_APPROVED}
 ORDER BY embedding <=> CAST(:qv AS vector)
 LIMIT :n
 """
