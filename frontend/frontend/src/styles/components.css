@@ -678,6 +678,49 @@
     }
   }
 
+  /* ── Indeterminate spinner ─────────────────────────────────────────────
+     For work with no measurable progress — an agent thinking, a request in
+     flight. A skeleton is the better answer whenever the *shape* of what is
+     coming is known; this is for when it genuinely is not.
+
+     The ring is a full circle of the accent at low opacity with one arc at
+     full strength, so what rotates reads as a moving highlight rather than a
+     fragment of a circle. */
+  .hub-spinner {
+    border-radius: 9999px;
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+    border-top-color: var(--color-accent);
+    animation: hubspin 0.85s linear infinite;
+  }
+
+  /* Unlike the skeleton shimmer this is not dropped outright: it is the only
+     signal that anything is happening, and removing it would leave a still
+     ring that reads as broken. It becomes a pulse in place instead — the
+     information survives, the rotation does not. */
+  @media (prefers-reduced-motion: reduce) {
+    .hub-spinner {
+      border-top-color: var(--color-accent);
+      animation: hubpulse 1.6s ease-in-out infinite;
+    }
+  }
+
+  @keyframes hubspin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes hubpulse {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
   /* ── Skeleton placeholders ──────────────────────────────────────────────
      One class, driven by `components/ui/skeleton.tsx`. The gradient is 200%
      wide so the highlight has somewhere to travel from and to; the keyframe
