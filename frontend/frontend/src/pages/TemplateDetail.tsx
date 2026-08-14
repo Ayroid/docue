@@ -12,6 +12,7 @@ import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/c
 import { VersionHistory } from '@/components/VersionHistory'
 import { Icon } from '@/components/ui/icon'
 import { DocumentPreviewSkeleton, Skeleton, SkeletonGroup } from '@/components/ui/skeleton'
+import { downloadVersionFile } from '@/services/versions'
 import { DownloadIcon } from '@/components/icons'
 
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
@@ -31,14 +32,26 @@ export function TemplateDetail() {
   const { fireToast } = useHub()
   const [load, setLoad] = useState<Load>({ state: 'loading' })
 
+  /* Which version the preview is showing. Seeded from the template's own
+     current version the moment it lands, rather than waiting on the history
+     request — starting at null and correcting later would fetch and render the
+     file twice for the same default. */
+  const [viewing, setViewing] = useState<{ id: string; number: number } | null>(null)
+
   useEffect(() => {
     if (!id) return
     let cancelled = false
     setLoad({ state: 'loading' })
+    setViewing(null)
 
     getTemplate(id)
       .then((template) => {
-        if (!cancelled) setLoad({ state: 'ready', template })
+        if (cancelled) return
+        setLoad({ state: 'ready', template })
+        setViewing({
+          id: template.current_version_id,
+          number: template.current_version?.version_number ?? 1,
+        })
       })
       .catch((err) => {
         if (cancelled) return
@@ -60,10 +73,14 @@ export function TemplateDetail() {
 
   const template = load.state === 'ready' ? load.template : null
 
+  /* Address the version explicitly whenever one is known: the plain
+     `/templates/{id}/download` serves whichever version is *current*, which is
+     the wrong file the moment an older one is selected. */
   const loadBytes = useCallback(() => {
     if (!id) return Promise.reject(new Error('No document requested.'))
+    if (viewing) return downloadVersionFile(id, viewing.id)
     return downloadTemplateFile(id)
-  }, [id])
+  }, [id, viewing])
 
   const handleDownload = useCallback(async () => {
     if (!template) return
@@ -140,6 +157,11 @@ export function TemplateDetail() {
      which only exists so the hooks can run before this early return. */
   const doc = load.template
   const version = doc.current_version
+
+  /* Everything else on this page — Download, Create document, Update template,
+     the File details panel — acts on the current version, so the preview
+     showing something else is worth saying out loud. */
+  const viewingOlder = Boolean(viewing && viewing.id !== doc.current_version_id)
 
   return (
     <PageBody>
@@ -224,23 +246,53 @@ export function TemplateDetail() {
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
         <Panel className="min-w-0">
-          <div className="flex items-center gap-2 mb-[14px]">
+          <div className="flex items-center gap-2 mb-[14px] flex-wrap">
             <Tag variant="accent" className="whitespace-nowrap">
-              Live preview
+              {viewing ? `Live preview · v${viewing.number}` : 'Live preview'}
             </Tag>
-            <span className="text-[11.5px] opacity-50 truncate">{doc.original_filename}</span>
+
+            {/* An older version on screen is easy to forget you asked for, and
+                every other control on this page acts on the current one. Say so
+                in place, and give it back in one click. */}
+            {viewingOlder ? (
+              <>
+                <span className="text-[11.5px] text-accent2-700 whitespace-nowrap">Not the current version</span>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="whitespace-nowrap"
+                  onClick={() =>
+                    setViewing({
+                      id: doc.current_version_id,
+                      number: doc.current_version?.version_number ?? 1,
+                    })
+                  }
+                >
+                  Back to current
+                </Button>
+              </>
+            ) : (
+              <span className="text-[11.5px] opacity-50 truncate">{doc.original_filename}</span>
+            )}
 
             {/* Sits with the preview it acts on rather than in the page header:
-                "open full page" means this pane, full width. */}
-            <Button asChild variant="primary" size="sm" className="ml-auto flex-none whitespace-nowrap">
-              <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
-                <Icon name="open_in_new" size={16} />
-                Open full page
-              </a>
-            </Button>
+                "open full page" means this pane, full width. It always opens the
+                current version, so it is held back while an older one is on
+                screen rather than quietly showing a different file. */}
+            {!viewingOlder ? (
+              <Button asChild variant="primary" size="sm" className="ml-auto flex-none whitespace-nowrap">
+                <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
+                  <Icon name="open_in_new" size={16} />
+                  Open full page
+                </a>
+              </Button>
+            ) : null}
           </div>
 
+          {/* Keyed on the version so switching tears the previous render down
+              rather than leaving it on screen while the next file loads. */}
           <DocumentPreview
+            key={viewing?.id ?? doc.current_version_id}
             format={doc.format}
             fileName={doc.original_filename}
             loadBytes={loadBytes}
@@ -281,8 +333,15 @@ export function TemplateDetail() {
             </Button>
           </div>
 
-          {/* Every version of this template, with what each one changed. */}
-          <VersionHistory templateId={doc.id} />
+          {/* Every version of this template, with what each one changed.
+              Picking one swaps the preview beside it. */}
+          <VersionHistory
+            templateId={doc.id}
+            selectedVersionId={viewing?.id ?? null}
+            onSelectVersion={(versionId, versionNumber) =>
+              setViewing({ id: versionId, number: versionNumber })
+            }
+          />
         </div>
       </div>
     </PageBody>

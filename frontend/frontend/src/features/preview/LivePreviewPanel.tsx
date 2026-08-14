@@ -30,16 +30,12 @@ export function LivePreviewPanel({
   preview,
   title,
   subtitle,
-  answersCaptured,
-  totalQuestions,
   pendingRegions = [],
 }: {
   original: ParsedDocument
   preview: LivePreview
   title: string
   subtitle: string
-  answersCaptured: number
-  totalQuestions: number
   /** Regions the question on screen will fill, marked so the user can see where
       their answer is about to land. */
   pendingRegions?: string[]
@@ -64,26 +60,33 @@ export function LivePreviewPanel({
   const showAccurateRender = renderStatus === 'ready' && !renderStale
 
   return (
-    <div className="bg-neutral-100 rounded-card py-[26px] px-7 flex flex-col">
-      <div className="flex items-center gap-2 mb-[14px] flex-wrap">
-        <Tag variant="accent" className="whitespace-nowrap">
-          Live preview
-        </Tag>
-        <span className="text-[11.5px] opacity-50">
-          {Math.min(answersCaptured, totalQuestions)} of {totalQuestions} answers captured
-        </span>
-        <div className="flex gap-[7px] flex-wrap ml-auto">
-          {LEGEND.map((l) => (
-            <Tag key={l.label} variant="neutral" className={l.className}>
-              {l.label}
-            </Tag>
-          ))}
+    /* Bounded and scrolled internally rather than growing with the document:
+       a template with thirty regions used to run the pane past the foot of the
+       page, so the composer you are typing into scrolled off screen while the
+       preview it feeds stayed put. */
+    <div className="bg-neutral-100 rounded-card flex flex-col min-h-0 h-full overflow-hidden">
+      {/* Held out of the scroll area: which pane this is, what the colours mean
+          and which document is being filled are all things you need while
+          reading any part of it. */}
+      <div className="flex-none px-7 pt-[26px] pb-[14px]">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Tag variant="accent" className="whitespace-nowrap">
+            Live preview
+          </Tag>
+          <div className="flex gap-[7px] flex-wrap ml-auto">
+            {LEGEND.map((l) => (
+              <Tag key={l.label} variant="neutral" className={l.className}>
+                {l.label}
+              </Tag>
+            ))}
+          </div>
         </div>
+
+        <div className="font-heading text-[20px] leading-[1.2] mt-[14px] mb-[3px]">{title}</div>
+        <div className="text-[11.5px] opacity-55">{subtitle}</div>
       </div>
 
-      <div className="font-heading text-[20px] leading-[1.2] mb-[3px]">{title}</div>
-      <div className="text-[11.5px] opacity-55 mb-5">{subtitle}</div>
-
+      <div className="flex-1 min-h-0 overflow-y-auto px-7 pb-[26px]">
       {/* ── Fast path: structural preview from the parsed regions ─────────── */}
       <table className="w-full border-collapse">
         <tbody>
@@ -151,6 +154,7 @@ export function LivePreviewPanel({
           }}
         />
       ) : null}
+      </div>
     </div>
   )
 }

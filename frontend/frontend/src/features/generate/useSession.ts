@@ -30,6 +30,9 @@ export interface ChatMessage {
   role: 'agent' | 'user'
   text: string
   chips?: { key: string; value: string; source?: 'answer' | 'volunteered' }[]
+  /** Echoed locally and not yet recorded by the server. Rendered as in-flight
+      so the transcript never implies a turn that the session does not hold. */
+  pending?: boolean
 }
 
 /** An instruction is a turn in the transcript but answers no question. */
@@ -46,7 +49,13 @@ const answeredCount = (session: SessionOut) => session.turns.filter(isAnswer).le
 
 export interface SessionState {
   loading: boolean
+  /** **Startup only** — the session could not be created or loaded, so there is
+      nothing to show. A failure while answering must never land here: it would
+      make the page throw away a half-finished interview. That is `sendError`. */
   error: string | null
+  /** The last answer or instruction failed. The conversation is intact and the
+      turn can simply be sent again. */
+  sendError: string | null
   /** Set while an answer is in flight — the extractor is a model call. */
   sending: boolean
   session: SessionOut | null
@@ -65,7 +74,9 @@ export interface SessionState {
   degraded: boolean
   warnings: string[]
   done: boolean
-  send: (answer: string, opts?: { skip?: boolean }) => Promise<void>
+  /** Resolves `true` when the turn was recorded. The caller needs to know, so
+      it can put the user's text back in the composer instead of losing it. */
+  send: (answer: string, opts?: { skip?: boolean }) => Promise<boolean>
   reload: () => void
 }
 
@@ -140,6 +151,7 @@ export function useSession(
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
   const [session, setSession] = useState<SessionOut | null>(null)
   const [template, setTemplate] = useState<TemplateOut | null>(null)
   const [original, setOriginal] = useState<ParsedDocument | null>(null)
@@ -148,6 +160,11 @@ export function useSession(
   const [warnings, setWarnings] = useState<string[]>([])
   const [degraded, setDegraded] = useState(false)
   const [nonce, setNonce] = useState(0)
+  /* The answer just sent, held only until the refetched session contains it.
+     Sending is a model call — extraction and derivation — so without this the
+     message is nowhere at all for several seconds: cleared from the composer
+     and not yet in the transcript. */
+  const [pendingEcho, setPendingEcho] = useState<string | null>(null)
 
   const reload = useCallback(() => setNonce((n) => n + 1), [])
 
@@ -203,15 +220,18 @@ export function useSession(
 
   const send = useCallback(
     async (answer: string, opts: { skip?: boolean } = {}) => {
-      if (!session) return
+      if (!session) return false
       const question = session.questions[answeredCount(session)] ?? null
       // No question left, but the user still has something to say — that is an
       // instruction, not a dead end. Skipping is meaningless without a question
       // to skip, so it is only offered on the answer path.
-      if (!question && (opts.skip || !answer.trim())) return
+      if (!question && (opts.skip || !answer.trim())) return false
 
+      /* Set before the request, not after: the whole point is that it lands on
+         screen on the same tick the user pressed Enter. */
+      setPendingEcho(opts.skip ? '(skipped)' : answer)
       setSending(true)
-      setError(null)
+      setSendError(null)
       try {
         const turn: AnswerOut = question
           ? await postAnswer(session.session_id, {
@@ -232,9 +252,19 @@ export function useSession(
         ])
         setSession(live)
         setSpecBody(spec)
+        return true
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'That answer could not be recorded.')
+        /* `sendError`, not `error`. Writing to `error` here is what let one
+           failed answer replace the whole conversation with the "could not
+           start a session" screen — the session had started perfectly well. */
+        setSendError(err instanceof Error ? err.message : 'That answer could not be recorded.')
+        return false
       } finally {
+        /* Dropped in the same commit as `setSession`, so the echo is replaced
+           by the real turn rather than both being on screen for a frame. On a
+           failure it goes too — a message that was never recorded must not sit
+           in the transcript looking like it was. */
+        setPendingEcho(null)
         setSending(false)
       }
     },
@@ -248,11 +278,18 @@ export function useSession(
     () => (specBody ? toChangeSpec(specBody.spec) : EMPTY_SPEC),
     [specBody],
   )
-  const messages = useMemo(() => messagesFrom(session, questions), [session, questions])
+  /* The echo goes last. `messagesFrom` ends on the question still on the table,
+     which is exactly the one this answer is replying to. */
+  const messages = useMemo(() => {
+    const transcript = messagesFrom(session, questions)
+    if (pendingEcho === null) return transcript
+    return [...transcript, { role: 'user' as const, text: pendingEcho, pending: true }]
+  }, [session, questions, pendingEcho])
 
   return {
     loading,
     error,
+    sendError,
     sending,
     session,
     template,
