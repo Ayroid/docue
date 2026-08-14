@@ -17,9 +17,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.conversation.planner import PlannedQuestion
+from app.conversation.planner import FALLBACK_PLANNER_VERSION, PlannedQuestion
 from app.models.generation_session import GenerationSession
 from app.models.question_plan import QuestionPlan
 
@@ -64,42 +65,67 @@ def save_question_plan(
     questions: list[PlannedQuestion],
     *,
     planner_version: str,
-) -> None:
+) -> bool:
     """Cache the plan for this version, replacing any earlier one.
 
     Replace rather than merge: `uq_question_plans_version_question` makes a
     partial overwrite a constraint violation, and a plan half from one planner
     version and half from another would be worse than either.
+
+    Returns whether this call is the one that wrote the plan. Two sessions
+    started against the same version at the same moment both miss the cache and
+    both arrive here, and the loser used to surface as a 500 from that unique
+    constraint. It is written inside a savepoint so the loser can roll back its
+    own insert alone and read the winner's plan instead -- a caller's other
+    pending work is untouched either way.
     """
-    existing = db.execute(
-        select(QuestionPlan).where(QuestionPlan.version_id == version_id)
-    ).scalars().all()
-    for row in existing:
-        db.delete(row)
-    db.flush()
+    try:
+        with db.begin_nested():
+            existing = db.execute(
+                select(QuestionPlan).where(QuestionPlan.version_id == version_id)
+            ).scalars().all()
+            for row in existing:
+                db.delete(row)
+            db.flush()
 
-    for question in questions:
-        db.add(
-            QuestionPlan(
-                id=uuid.uuid4(),
-                version_id=version_id,
-                question_no=question.question_no,
-                question_text=question.question_text,
-                hint=question.hint,
-                example=question.example,
-                covers_regions=list(question.covers_regions),
-                planner_version=planner_version,
-            )
+            for question in questions:
+                db.add(
+                    QuestionPlan(
+                        id=uuid.uuid4(),
+                        version_id=version_id,
+                        question_no=question.question_no,
+                        question_text=question.question_text,
+                        hint=question.hint,
+                        example=question.example,
+                        covers_regions=list(question.covers_regions),
+                        planner_version=planner_version,
+                    )
+                )
+            db.flush()
+    except IntegrityError:
+        logger.warning(
+            "another session cached a plan for version %s first; keeping theirs", version_id
         )
-    db.flush()
+        return False
+    return True
 
 
-def load_question_plan(db: Session, version_id: uuid.UUID) -> list[PlannedQuestion]:
+def load_question_plan(
+    db: Session, version_id: uuid.UUID, *, include_fallback: bool = True
+) -> list[PlannedQuestion]:
     """The cached plan for a version, or `[]`.
 
     A cache hit is what makes the second session against a document cost zero
     planner calls, and what keeps the questions stable when Bedrock is not
     reachable.
+
+    `include_fallback=False` treats a plan written by the structural fallback as
+    a miss. That is for `POST /sessions` only: a plan computed while the model
+    was unreachable is a degraded product, and serving it from cache forever
+    would mean one outage permanently downgrades every future interview on that
+    document. An in-flight session must keep the questions it started with, so
+    every other call site takes the default and gets the cached plan whatever
+    produced it.
     """
     rows = (
         db.execute(
@@ -110,6 +136,12 @@ def load_question_plan(db: Session, version_id: uuid.UUID) -> list[PlannedQuesti
         .scalars()
         .all()
     )
+    if rows and not include_fallback and rows[0].planner_version == FALLBACK_PLANNER_VERSION:
+        logger.info(
+            "version %s has only a structural-fallback plan; re-planning with the model",
+            version_id,
+        )
+        return []
     return [
         PlannedQuestion(
             question_no=row.question_no,

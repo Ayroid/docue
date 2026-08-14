@@ -43,6 +43,7 @@ from app.schemas.change_spec import (
     SetBulletsOp,
     SetNotesOp,
     SetValueOp,
+    Target,
 )
 
 logger = logging.getLogger("app.compiler.spec")
@@ -52,6 +53,7 @@ __all__ = [
     "SpecCompileError",
     "SpecCompileResult",
     "compile_spec",
+    "value_rejection_reason",
 ]
 
 
@@ -266,6 +268,36 @@ def _value_reason(fmt: str, region: Any, operation: Any) -> str | None:
     return None
 
 
+def value_rejection_reason(fmt: str, region: Any, value: Any) -> str | None:
+    """Why `value` cannot be written into `region`, if it cannot. Public.
+
+    The same judgement `_value_reason` makes mid-compile, exposed so the review
+    screen can refuse a badly-typed edit *at the door*, in the compiler's own
+    words, instead of accepting it and turning it into a dropped operation two
+    endpoints later. Callers must not reimplement the rule: one copy enforced
+    here and another enforced there is precisely how a value gets accepted by
+    one and silently discarded by the other.
+
+    Rows are not judged -- a table's cells are checked when they are built,
+    against that table's own detected header.
+    """
+    if isinstance(value, list):
+        return None
+    return _value_reason(
+        fmt,
+        region,
+        # `provenance` is required on the model and unread by `_value_reason`;
+        # this operation is a probe that is never compiled, never stored and
+        # never seen by a user. It exists to be judged and discarded.
+        SetValueOp(
+            op="set_value",
+            target=Target(region_id=region.region_id),
+            value=value,
+            provenance="probe",
+        ),
+    )
+
+
 def _build_xlsx(schema: Any, operation: Any, region: Any) -> list[Any]:
     from app.compiler import region_ops
 
@@ -442,14 +474,35 @@ def _compile_and_qa(fmt: str, data: bytes, schema: Any, ops: list[Any]) -> dict[
 
 
 def _check_spec_assertions(
-    spec: ChangeSpec, fmt: str, before: Any, after: Any, data: bytes, schema: Any
+    spec: ChangeSpec,
+    fmt: str,
+    before: Any,
+    after: Any,
+    data: bytes,
+    schema: Any,
+    dropped: list[DroppedOperation] | None = None,
 ) -> list[AssertionOutcome]:
     """Replay the caller's own assertions (plan §11 Level 2).
 
     Distinct from the compiler's assertions, which say *what was written*. These
     say *what the planner expected*, which is what catches "the document is valid
     but we didn't actually change the venue".
+
+    **An assertion whose operation was dropped is not evaluated.** The planner
+    emits one `must_equal` per `set_value`, and a dropped operation never ran --
+    so its assertion is guaranteed to read the untouched original and fail. That
+    turned every drop into a total compile failure and made `dropped` useless for
+    exactly the case it was built for: one badly-typed value from the extractor,
+    the deriver or a review-screen edit blocked the whole document instead of
+    leaving one region untouched. The drop is still reported in `dropped`, with
+    its reason, and the review screen renders it -- nothing is hidden by this,
+    the failure is simply attributed to the operation rather than the document.
     """
+    # `DroppedOperation.target` carries the resolved `region_id` for every drop
+    # that got as far as having a region -- which is every drop this skip is for.
+    # An unresolvable target is left as its raw ref, matches no region_id, and is
+    # correctly not skipped: there is no region there to have been left untouched.
+    dropped_regions = {d.target for d in (dropped or [])}
     outcomes: list[AssertionOutcome] = []
     for assertion in spec.assertions:
         invariant = getattr(assertion, "invariant", None)
@@ -470,6 +523,9 @@ def _check_spec_assertions(
         # A value assertion. Read it back out of the compiled bytes through the
         # region schema, so a `ref` is resolved the same way an operation's is.
         region = _region_by_ref(schema, assertion.ref.split("!")[-1], assertion.sheet)
+        if region is not None and region.region_id in dropped_regions:
+            # Its operation never ran. See the docstring.
+            continue
         actual = None
         if region is not None:
             fresh = _read_region_content(data, fmt, region.region_id)
@@ -615,7 +671,9 @@ def compile_spec(
     outcome = _compile_and_qa(fmt, data, schema, ops)
     after = fingerprint(outcome["data"], fmt)
 
-    spec_assertions = _check_spec_assertions(spec, fmt, before, after, outcome["data"], schema)
+    spec_assertions = _check_spec_assertions(
+        spec, fmt, before, after, outcome["data"], schema, dropped
+    )
 
     result = SpecCompileResult(
         data=outcome["data"],

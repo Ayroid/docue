@@ -36,6 +36,7 @@ Four environment facts are baked in, each of which cost real time to find:
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -90,10 +91,15 @@ class LLMCall:
     error: str | None = None
 
 
-_calls: list[LLMCall] = []
+# Bounded: this is a rolling window for `scripts/` and the run report, not a
+# ledger. `llm_calls` (plan §8) is the durable record. Unbounded, it grew by one
+# entry per model call for the life of the process.
+_MAX_REMEMBERED_CALLS = 500
+_calls: deque[LLMCall] = deque(maxlen=_MAX_REMEMBERED_CALLS)
 
 
 def last_calls() -> list[LLMCall]:
+    """The most recent calls, oldest first, capped at `_MAX_REMEMBERED_CALLS`."""
     return list(_calls)
 
 

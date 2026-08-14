@@ -180,6 +180,17 @@ def parse_entries(
             rows = _rows(entry, (columns_by_region or {}).get(region_id))
             if rows:
                 values[region_id] = rows
+            else:
+                # Rows were offered and every one lost its cells to an
+                # unrecognised column name. The region is left untouched, which
+                # is correct -- but silently, and it is not a `dropped` id
+                # either, so without this line it vanishes with no counter
+                # anywhere. That looks identical to a model that said nothing.
+                logger.warning(
+                    "%s: rows were returned but no cell named a known column; "
+                    "the region is left untouched",
+                    region_id,
+                )
             continue
 
         if "value" in entry:

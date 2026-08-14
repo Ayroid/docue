@@ -216,9 +216,24 @@ def derive_values(
     # Same defensive read as everywhere else in this package: nested item shape
     # is not guaranteed (see `app/ai/bedrock.py::complete_json`). An entry with
     # no readable basis loses its value below, which is the intended direction.
-    entries = [e for e in payload.get("entries", []) if isinstance(e, dict)]
-    basis_by_id = {e.get("region_id"): str(e.get("basis") or "").strip() for e in entries}
-    confidence_by_id = {e.get("region_id"): e.get("confidence") for e in entries}
+    #
+    # First entry wins on a duplicate `region_id`, because that is what
+    # `parse_entries` does with the *value*. A dict comprehension over the
+    # entries keeps the last instead, so a model that answered the same region
+    # twice used to pair entry one's value with entry two's justification --
+    # which is worse than either alone: the basis is the whole defence against
+    # fabrication, and a mismatched one lets an invented value inherit a real
+    # citation and survive the drop below.
+    basis_by_id: dict[str, str] = {}
+    confidence_by_id: dict[str, Any] = {}
+    for entry in payload.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        entry_id = entry.get("region_id")
+        if not isinstance(entry_id, str) or entry_id in basis_by_id:
+            continue
+        basis_by_id[entry_id] = str(entry.get("basis") or "").strip()
+        confidence_by_id[entry_id] = entry.get("confidence")
 
     for region_id, value in parsed.items():
         if value is None:

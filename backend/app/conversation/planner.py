@@ -26,9 +26,21 @@ from app.ai.prompts import PLANNER_SYSTEM, PLANNER_VERSION
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PlannedQuestion", "QuestionPlanResult", "plan_questions"]
+__all__ = [
+    "FALLBACK_PLANNER_VERSION",
+    "PlannedQuestion",
+    "QuestionPlanResult",
+    "plan_questions",
+]
 
 MAX_QUESTIONS = 4
+
+# The structural fallback is cached in `question_plans` exactly like a real
+# plan, so it has to be *labelled* like a different planner. Without this the
+# interview computed during a Bedrock outage is served to every later session
+# on that version forever, under the healthy planner's version string, with
+# nothing to distinguish it and no path back to the model once it recovers.
+FALLBACK_PLANNER_VERSION = f"{PLANNER_VERSION}+structural-fallback"
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -223,10 +235,16 @@ def plan_questions(
         logger.warning("question planning failed, using the structural grouping: %s", exc)
         result.errors.append(str(exc))
         result.questions = _fallback(regions)
+        result.planner_version = FALLBACK_PLANNER_VERSION
         return result
 
     claimed: set[str] = set()
-    for item in payload.get("questions", [])[:MAX_QUESTIONS]:
+    for item in payload.get("questions", []):
+        # The cap counts questions *accepted*, not entries offered. Slicing the
+        # payload first meant four malformed entries could exhaust the budget
+        # and discard a fifth good one, taking the whole plan to the fallback.
+        if len(result.questions) >= MAX_QUESTIONS:
+            break
         # Bedrock's forced-tool validation does not reliably enforce nested item
         # shape -- this exact schema has returned an array of bare strings. See
         # `app/ai/bedrock.py::complete_json`.
@@ -265,6 +283,7 @@ def plan_questions(
         logger.warning("planner returned no usable question; using the structural grouping")
         result.errors.append("planner produced no question naming a known region")
         result.questions = _fallback(regions)
+        result.planner_version = FALLBACK_PLANNER_VERSION
         return result
 
     if result.uncovered:

@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.generate import _fetch, _load, compile_and_store
+from app.compiler.from_spec import value_rejection_reason
 from app.conversation.context import assemble_context
 from app.conversation.deriver import derive_values
 from app.conversation.extractor import extract_answer
@@ -48,7 +49,6 @@ from app.models.generation_session import (
     STATUS_ABANDONED,
     STATUS_ACTIVE,
     STATUS_COMMITTED,
-    STATUS_COMPILED,
     GenerationSession,
 )
 from app.models.template import Template
@@ -116,12 +116,43 @@ def _progress(
     session: GenerationSession, questions: list[PlannedQuestion], schema: Any
 ) -> SessionProgress:
     derived = (session.derived_values or {}).get("values", {})
+    filled = session.filled_values or {}
     return SessionProgress(
         answered=len(session.turns or []),
         total_questions=len(questions),
-        fields_filled=len(session.filled_values or {}) + len(derived),
+        # Union, not sum. The deriver skips regions already in `filled_values`,
+        # so the two are disjoint *when it runs* -- but a review-screen edit
+        # (`PATCH /spec/{i}`) writes a derived region into `filled_values`
+        # afterwards, and adding the lengths then counts it twice and can put
+        # the headline counter above `fields_total`.
+        fields_filled=len(set(filled) | set(derived)),
         fields_total=_fields_total(schema),
     )
+
+
+def _skipped_regions(
+    session: GenerationSession, questions: list[PlannedQuestion]
+) -> set[str]:
+    """Regions whose only question the user chose to skip.
+
+    Skipping is a decision, not an omission: `POST /answer` promises those
+    regions stay untouched and visibly empty on the review screen, so the user
+    can see the gap and fill it themselves. The deriver picks its targets from
+    `must_ask` + `inferable` minus whatever is already filled -- and a skipped
+    turn fills nothing, so without this set stage ⑥ writes precisely the fields
+    the user declined to answer. That is the one thing it must never do.
+
+    Regions the planner also handed to a question that *was* answered are
+    excluded: the planner keeps clusters disjoint, so this is defensive, but if
+    they ever overlap the answered question is the stronger signal.
+    """
+    covers = {q.question_id: q.covers_regions for q in questions}
+    skipped: set[str] = set()
+    answered: set[str] = set()
+    for turn in session.turns or []:
+        bucket = skipped if turn.get("skipped") else answered
+        bucket.update(covers.get(turn.get("question_id"), []))
+    return skipped - answered
 
 
 def _question_out(question: PlannedQuestion) -> QuestionOut:
@@ -192,7 +223,12 @@ def start_session(
 
     # The plan is a property of the version, so a cache hit here means the
     # second session on this document costs no planner call at all.
-    questions = load_question_plan(db, version.id)
+    #
+    # `include_fallback=False`: a plan written by the structural fallback is
+    # deliberately *not* a hit. Caching it like a real one meant a single
+    # Bedrock outage permanently downgraded every future interview on this
+    # document to "Please provide: Venue, Date, Attendees", with no way back.
+    questions = load_question_plan(db, version.id, include_fallback=False)
     planner_errors: list[str] = []
     if not questions:
         plan = plan_questions(
@@ -203,10 +239,13 @@ def start_session(
         )
         questions = plan.questions
         planner_errors = plan.errors
-        if questions:
-            save_question_plan(
-                db, version.id, questions, planner_version=plan.planner_version
-            )
+        if questions and not save_question_plan(
+            db, version.id, questions, planner_version=plan.planner_version
+        ):
+            # Another session planned this version in the same instant and won
+            # the unique constraint. Theirs is as good as ours and is the one
+            # on disk, so this session joins it rather than failing.
+            questions = load_question_plan(db, version.id) or questions
 
     session = GenerationSession(
         id=uuid.uuid4(),
@@ -306,10 +345,14 @@ def answer(
         # Last turn. The deriver reasons over the whole document, so it runs
         # here rather than on every answer -- see the module docstring.
         context = session.known_context or {}
+        # A skipped question's regions are held back from the deriver: this
+        # endpoint promises they stay untouched, and they are unfilled by
+        # definition, so they would otherwise be its first targets.
+        held_back = _skipped_regions(session, questions)
         targets = [
             rid
             for rid in context.get("inferable", []) + context.get("must_ask", [])
-            if rid not in (session.filled_values or {})
+            if rid not in (session.filled_values or {}) and rid not in held_back
         ]
         derivation = derive_values(
             schema,
@@ -327,6 +370,11 @@ def answer(
             warnings.append(
                 f"{len(derivation.unjustified)} derived value(s) were discarded for "
                 "naming no source in your answers."
+            )
+        if held_back:
+            warnings.append(
+                f"{len(held_back)} field(s) from skipped questions were left empty "
+                "rather than derived — you can fill them on the review screen."
             )
 
     db.commit()
@@ -431,11 +479,34 @@ def patch_spec_operation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"This spec has {len(operations)} operations; there is no #{op_index}.",
         )
-    target = operations[op_index].target.region_id
+    operation = operations[op_index]
+    if getattr(operation, "op", None) == "protect":
+        # `plan_change_spec` appends one `protect` op per protected region to
+        # this same list, so they are addressable by index like any other. They
+        # carry no value: an edit aimed at one used to be accepted with a 200,
+        # write a protected region_id into `filled_values`, and then be dropped
+        # by the planner on the rebuild -- silently doing nothing, forever.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="That operation is a protection declaration, not an edit. It has no "
+            "value to change, and the region it names is never written.",
+        )
+    target = operation.target.region_id
     if not target:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="That operation does not name a region and cannot be edited.",
+        )
+
+    region = next((r for r in schema.regions if r.region_id == target), None)
+    if region is None or not region.editable or region.protected:
+        # The same refusal `plan_change_spec` makes, made at the door instead:
+        # a session resumed against a re-detected version can name a region that
+        # has since become protected, and the answer is no here rather than a
+        # value quietly parked in `filled_values` that never compiles.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{target} is not an editable region in this version and cannot be set.",
         )
 
     value = request.rows if request.rows is not None else request.value
@@ -443,6 +514,18 @@ def patch_spec_operation(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Provide a `value` or `rows`.",
+        )
+
+    rejection = value_rejection_reason(schema.format, region, value)
+    if rejection:
+        # Refused with the compiler's own words rather than accepted and dropped
+        # at compile time. Typing prose into a date cell used to be a 200 here,
+        # a dropped operation at commit, and -- because the planner had already
+        # written a `must_equal` for it -- a failed QA gate that blocked the
+        # whole document with no indication of which field caused it.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"That value cannot go into {region.label or target}: {rejection}",
         )
 
     filled = dict(session.filled_values or {})
@@ -473,8 +556,31 @@ def compile_session(
     A thin wrapper over `compile_and_store` by design: the bytes path shipped
     and was tested before the conversation existed, and a second implementation
     would eventually disagree with it about whether QA is a gate.
+
+    **A dry run keeps nothing, and that now includes the session's status.** It
+    used to move `active` to `compiled` on a pass, which was wrong twice over.
+    The review screen fires a dry run on mount and is reachable after a single
+    answer, so previewing mid-interview locked the session out of `POST /answer`
+    with a 409; and re-opening it after a real commit downgraded `committed`
+    back to `compiled` while `completed_at` stayed set, leaving a row that
+    contradicted itself. Every dry run is already on `qa_runs` with
+    `dry_run=true`, which is the better record of it anyway.
     """
     session = _session(db, session_id)
+    if session.status == STATUS_ABANDONED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This session was abandoned and cannot be compiled.",
+        )
+    if not request.dry_run and session.status == STATUS_COMMITTED:
+        # Not idempotency for its own sake: without this a second commit mints a
+        # second version off the same answers, and a double-click is enough.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This session has already been committed. Start a new one to produce "
+            "another version.",
+        )
+
     template, version, schema = _context_for(db, session)
     planned = _build_spec(db, session, schema, overrides=request.overrides)
 
@@ -494,10 +600,9 @@ def compile_session(
         session_id=session.id,
     )
 
-    if response.overall == "pass":
-        session.status = STATUS_COMMITTED if not request.dry_run else STATUS_COMPILED
-        if not request.dry_run:
-            session.completed_at = datetime.now(timezone.utc)
+    if not request.dry_run and response.overall == "pass":
+        session.status = STATUS_COMMITTED
+        session.completed_at = datetime.now(timezone.utc)
         db.commit()
 
     return response
