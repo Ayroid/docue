@@ -56,8 +56,11 @@ SERVER_START_TIMEOUT_S = 60.0
 # the version row, which exists the moment the 202 returns.
 UPLOAD_SETTLE_S = 3.0
 
-PASSWORD = "Sup3rSecret1"
-NEW_PASSWORD = "Even5aferPass"
+PASSWORD = "check-flow-password"
+# A passphrase with no digit and no upper case, which the old composition rules
+# would have refused. Using one here is the end-to-end proof that the policy is
+# length-only -- a unit test can say so, but only this proves the route agrees.
+NEW_PASSWORD = "correct horse battery staple"
 
 # A tiny but genuinely valid .docx, built at runtime rather than committed: the
 # corpus lives outside the repo (see `tests/conftest.py`) and this script must
@@ -431,9 +434,9 @@ def main() -> int:
         check("a reset code can be re-sent and read back", bool(reset_code))
 
         status, _ = _post(f"{api}/auth/reset-password", {
-            "email": member_email, "code": reset_code, "new_password": "weak",
+            "email": member_email, "code": reset_code, "new_password": "short",
         })
-        check("a weak new password is refused", status == 422, f"got {status}")
+        check("a too-short new password is refused", status == 422, f"got {status}")
 
         status, body = _post(f"{api}/auth/reset-password", {
             "email": member_email, "code": reset_code, "new_password": NEW_PASSWORD,
@@ -443,7 +446,7 @@ def main() -> int:
         status, _ = _post(f"{api}/auth/login", {"identifier": member_email, "password": PASSWORD})
         check("the old password no longer works", status == 401, f"got {status}")
         status, body = _post(f"{api}/auth/login", {"identifier": f"member{tag}", "password": NEW_PASSWORD})
-        check("the new password works, by username too", status == 200, f"got {status}")
+        check("a passphrase is accepted, and login works by username too", status == 200, f"got {status}")
 
         # ── 7. rejection ──────────────────────────────────────────────────
         print("\n7. Rejection requires a note and notifies")

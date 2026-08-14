@@ -24,6 +24,7 @@ from app.core.config import settings
 # a longer password raises in bcrypt 5, so the limit is enforced at validation
 # time with a message that says so rather than surfacing as a 500.
 MAX_PASSWORD_BYTES = 72
+# The only rule, and the only one worth having -- see `password_problem`.
 MIN_PASSWORD_LENGTH = 8
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,64}$")
@@ -52,6 +53,14 @@ def verify_password(password: str, password_hash: str) -> bool:
 def password_problem(password: str) -> str | None:
     """The reason this password is unusable, or None if it is fine.
 
+    **Length only, deliberately.** There were composition rules here -- upper
+    and lower case, at least one digit -- and they are gone. NIST SP 800-63B
+    advises against exactly those: they do not measurably raise the cost of an
+    attack, because people satisfy them the same predictable way. `Password1`
+    passes every one of them and is in the first thousand entries of any
+    wordlist, while `correct horse battery staple` failed two of them. What
+    actually resists guessing is length, so that is what is checked.
+
     Returns a message rather than raising so both the register and the reset
     path can surface it as a 422 with the same wording.
     """
@@ -59,10 +68,6 @@ def password_problem(password: str) -> str | None:
         return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
     if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
         return f"Password must be at most {MAX_PASSWORD_BYTES} bytes."
-    if password.lower() == password or password.upper() == password:
-        return "Password must contain both upper and lower case letters."
-    if not any(character.isdigit() for character in password):
-        return "Password must contain at least one digit."
     return None
 
 

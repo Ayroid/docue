@@ -66,13 +66,19 @@ def test_verify_password_survives_a_corrupt_hash():
     "password,expect_problem",
     [
         (GOOD_PASSWORD, False),
+        ("exactly8", False),  # the boundary is inclusive
         ("Sh0rt", True),  # under 8
-        ("alllowercase1", True),  # no upper
-        ("ALLUPPERCASE1", True),  # no lower
-        ("NoDigitsHere", True),  # no digit
+        ("", True),
+        # All three of these used to be refused, for having no upper case, no
+        # lower case and no digit respectively. The composition rules are gone
+        # (see `password_problem`), and a passphrase is exactly the thing they
+        # were rejecting while waving `Passw0rd!` through.
+        ("alllowercaseletters", False),
+        ("ALLUPPERCASELETTERS", False),
+        ("correct horse battery staple", False),
     ],
 )
-def test_password_policy(password, expect_problem):
+def test_password_policy_is_length_only(password, expect_problem):
     assert (password_problem(password) is not None) is expect_problem
 
 
@@ -83,8 +89,18 @@ def test_password_over_bcrypt_limit_is_refused_not_truncated():
     not have, so the policy refuses it with a message rather than storing a
     hash of its first 72 bytes.
     """
-    too_long = "Aa1" + "x" * MAX_PASSWORD_BYTES
+    too_long = "x" * (MAX_PASSWORD_BYTES + 1)
     assert password_problem(too_long) is not None
+    assert password_problem("x" * MAX_PASSWORD_BYTES) is None
+
+
+def test_password_length_is_measured_in_bytes_against_the_bcrypt_limit():
+    """`len()` counts characters; bcrypt counts bytes.
+
+    An emoji is four bytes, so 20 of them are 80 bytes -- past the limit while
+    looking like a short password to a character count.
+    """
+    assert password_problem("🙂" * 20) is not None
 
 
 # ── identifiers ───────────────────────────────────────────────────────────
