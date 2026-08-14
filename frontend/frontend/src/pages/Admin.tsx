@@ -17,7 +17,7 @@ import { Icon } from '@/components/ui/icon'
 import { ApprovalCardSkeleton, SkeletonGroup } from '@/components/ui/skeleton'
 import { Segmented } from '@/components/ui/segmented'
 
-/* `all` leads and is the default: doc control opening this page wants to see
+/* `all` leads and is the default: an admin opening this page wants to see
    the whole queue, and a filter that hides two thirds of it by default reads as
    an empty queue rather than a filtered one. It passes no `status_filter`, and
    the API defaults to every status. */
@@ -41,7 +41,7 @@ const STATUS_LABEL: Record<ApprovalStatus, string> = {
 }
 
 /**
- * Doc control's review queue, read from `GET /admin/approvals`.
+ * The admin review queue, read from `GET /admin/approvals`.
  *
  * This used to list templates uploaded *in this browser tab* and "approve"
  * them by flipping a label in memory — the server published everything on
@@ -103,7 +103,7 @@ export function Admin() {
     setBusyId(rejecting.version_id)
     try {
       await rejectVersion(rejecting.version_id, note.trim())
-      fireToast(`Sent ${rejecting.title} back to ${rejecting.submitted_by_name ?? 'its submitter'}`)
+      fireToast(`Rejected ${rejecting.title} — ${rejecting.submitted_by_name ?? 'the submitter'} has been notified`)
       setRejecting(null)
       setNote('')
       await load()
@@ -118,7 +118,7 @@ export function Admin() {
     <PageBody>
       <PageHeading
         title="Admin"
-        subtitle="Doc control — every template version waiting on a decision."
+        subtitle="Every template version waiting on a decision."
       />
 
       <div className="flex items-center gap-4 flex-wrap">
@@ -239,7 +239,7 @@ export function Admin() {
                         setNote('')
                       }}
                     >
-                      Request changes
+                      Reject
                     </Button>
                     <Button
                       variant="primary"
@@ -289,7 +289,7 @@ export function Admin() {
             setNote('')
           }
         }}
-        title="Request changes"
+        title="Reject this version"
         actions={
           <>
             <Button
@@ -306,15 +306,16 @@ export function Admin() {
               disabled={note.trim().length < 3 || busyId !== null}
               onClick={() => void confirmReject()}
             >
-              Send back
+              Reject
             </Button>
           </>
         }
       >
         <div className="dialog-body">
           <p className="m-0 mb-3 text-body-md">
-            {rejecting?.submitted_by_name ?? 'The submitter'} gets this note in the hub and by email.
-            It is the only thing telling them what to fix, so a reason is required.
+            {rejecting?.submitted_by_name ?? 'The submitter'} is told it was rejected, and gets this
+            note in the hub and by email. It is the only thing telling them why, so a reason is
+            required.
           </p>
           <Textarea
             value={note}
