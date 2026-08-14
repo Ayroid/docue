@@ -1,5 +1,6 @@
 import hashlib
 import io
+import logging
 import uuid
 from pathlib import Path
 
@@ -7,14 +8,17 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.api.deps import current_user, optional_user
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.jobs.runner import enqueue_ingestion, run_ingestion_job
 from app.models.document_region import DocumentRegion
 from app.models.document_schema import DocumentSchemaRow
 from app.models.job import KIND_INGESTION, Job
 from app.models.template import Template
-from app.models.template_version import TemplateVersion
+from app.models.template_version import APPROVAL_APPROVED, APPROVAL_PENDING, TemplateVersion
+from app.models.user import ROLE_ADMIN, User
+from app.notifications.service import notify_approval_requested
 from app.schemas.ingestion import (
     DocumentSchemaOut,
     IngestionAccepted,
@@ -23,6 +27,8 @@ from app.schemas.ingestion import (
 )
 from app.schemas.template import TemplateOut, TemplateVersionOut
 from app.storage.s3 import delete_file, download_file, upload_file
+
+logger = logging.getLogger("app.api.templates")
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -35,6 +41,26 @@ MIME_TYPES = {
 # xlsx/docx/pptx are all zip containers; a valid file must start with the zip local-file-header signature
 ZIP_MAGIC = b"PK\x03\x04"
 MAX_PAGE_SIZE = 100
+
+
+def _visible_to(user: User | None, template: Template, version: TemplateVersion | None) -> bool:
+    """Whether this caller may see this template at all.
+
+    Approved templates are public to any signed-in user. An unapproved one is
+    visible only to the person who uploaded it and to admins -- the submitter
+    needs to watch their own upload through review, and doc control needs to
+    open it to decide. Everyone else gets a 404, not a 403: the existence of a
+    colleague's rejected draft is not theirs to learn.
+    """
+    if version is not None and version.approval_status == APPROVAL_APPROVED:
+        return True
+    if user is None:
+        return False
+    if user.role == ROLE_ADMIN:
+        return True
+    return template.owner_id == user.id or (
+        version is not None and version.submitted_by == user.id
+    )
 
 
 def _to_template_out(template: Template, version: TemplateVersion | None) -> TemplateOut:
@@ -55,6 +81,9 @@ def _to_template_out(template: Template, version: TemplateVersion | None) -> Tem
         # whether semantic search can return this template, so it is read from
         # the column that decides it instead of a flag that could disagree.
         searchable=template.embedding is not None,
+        approval_status=version.approval_status if version is not None else APPROVAL_PENDING,
+        review_note=version.review_note if version is not None else None,
+        owner_id=template.owner_id,
         current_version_id=template.current_version_id,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -67,6 +96,7 @@ async def upload_template(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> IngestionAccepted:
     """Store the original, then ingest it in the background.
 
@@ -75,6 +105,11 @@ async def upload_template(
     region detection and holding the request open for it would give the frontend
     nothing to render. The template row exists by the time this returns, so
     `GET /templates/{id}` works immediately -- only its schema arrives later.
+
+    **The version lands `pending` and is not in the library.** `GET /templates`
+    filters on approval, so an upload is stored, ingested and searchable-ready
+    but genuinely unlisted until an admin approves it. Doc control is notified
+    in the hub and by email as soon as the row is committed.
     """
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_FORMATS:
@@ -127,6 +162,7 @@ async def upload_template(
             title=Path(file.filename).stem,
             original_filename=file.filename,
             format=fmt,
+            owner_id=user.id,
         )
         db.add(template)
         db.flush()  # templates row must exist before template_versions.template_id can reference it
@@ -140,6 +176,8 @@ async def upload_template(
             file_hash=hasher.hexdigest(),
             size_bytes=size,
             mime_type=MIME_TYPES[fmt],
+            approval_status=APPROVAL_PENDING,
+            submitted_by=user.id,
         )
         db.add(version)
         db.flush()  # template_versions row must exist before templates.current_version_id can reference it
@@ -158,9 +196,14 @@ async def upload_template(
             detail="Failed to save template metadata.",
         ) from exc
 
-    # Runs after the response is sent. The bytes are already in memory from
+    # Both run after the response is sent. Notifying doc control takes an SMTP
+    # round trip per admin, and the uploader should not wait through it to be
+    # told their file was accepted. The bytes are already in memory from
     # hashing, so they are handed over rather than re-fetched from S3.
     background_tasks.add_task(run_ingestion_job, job_id, template_id, version_id, payload)
+    background_tasks.add_task(
+        _announce_submission, template_id, version_id, template.title, user.id
+    )
 
     return IngestionAccepted(
         template_id=template_id,
@@ -170,13 +213,50 @@ async def upload_template(
     )
 
 
+def _announce_submission(
+    template_id: uuid.UUID, version_id: uuid.UUID, title: str, submitter_id: uuid.UUID
+) -> None:
+    """Tell the admins, on its own session.
+
+    A background task outlives the request, and with it the `get_db` session
+    that was closed when the response went out -- so this opens its own rather
+    than closing over one. Failures are logged and swallowed: the upload
+    already succeeded, and the version is in the queue whether or not the
+    announcement got out.
+    """
+    db = SessionLocal()
+    try:
+        submitter = db.get(User, submitter_id)
+        notify_approval_requested(
+            db,
+            submitter=submitter,
+            template_title=title,
+            template_id=template_id,
+            version_id=version_id,
+            version_number=1,
+        )
+    except Exception:
+        logger.exception("Failed to announce version %s for approval", version_id)
+    finally:
+        db.close()
+
+
 @router.get("", response_model=list[TemplateOut])
 def list_templates(
     page: int = 1,
     page_size: int = 20,
     format: str | None = None,
+    mine: bool = False,
     db: Session = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ) -> list[TemplateOut]:
+    """The library: approved versions only, unless you ask for your own.
+
+    `mine=true` returns the caller's own submissions whatever their review
+    state, which is what lets someone watch an upload through the queue. It is
+    the only way to see an unapproved template here, and it is scoped to the
+    caller -- an anonymous `mine=true` is simply empty.
+    """
     if page < 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="page must be >= 1.")
     if not (1 <= page_size <= MAX_PAGE_SIZE):
@@ -190,20 +270,27 @@ def list_templates(
             detail=f"Unsupported format filter '{format}'. Use one of {sorted(MIME_TYPES)}.",
         )
 
-    query = db.query(Template).filter(Template.status == "active")
+    # Joined to the current version rather than filtered afterwards, so
+    # pagination counts the rows the caller will actually receive -- filtering
+    # a fetched page would return short pages and skip templates entirely.
+    query = (
+        db.query(Template, TemplateVersion)
+        .join(TemplateVersion, TemplateVersion.id == Template.current_version_id)
+        .filter(Template.status == "active")
+    )
+    if mine:
+        if user is None:
+            return []
+        query = query.filter(Template.owner_id == user.id)
+    else:
+        query = query.filter(TemplateVersion.approval_status == APPROVAL_APPROVED)
     if format is not None:
         query = query.filter(Template.format == format)
-    templates = (
+
+    rows = (
         query.order_by(Template.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
     )
-
-    version_ids = [t.current_version_id for t in templates if t.current_version_id is not None]
-    versions_by_id = {}
-    if version_ids:
-        versions = db.query(TemplateVersion).filter(TemplateVersion.id.in_(version_ids)).all()
-        versions_by_id = {v.id: v for v in versions}
-
-    return [_to_template_out(t, versions_by_id.get(t.current_version_id)) for t in templates]
+    return [_to_template_out(template, version) for template, version in rows]
 
 
 def _version_for(db: Session, template_id: uuid.UUID, version_id: uuid.UUID | None) -> tuple[Template, TemplateVersion]:
@@ -333,7 +420,11 @@ def get_regions(
 
 
 @router.get("/{template_id}", response_model=TemplateOut)
-def get_template(template_id: uuid.UUID, db: Session = Depends(get_db)) -> TemplateOut:
+def get_template(
+    template_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> TemplateOut:
     template = db.get(Template, template_id)
     if template is None or template.status == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
@@ -341,12 +432,18 @@ def get_template(template_id: uuid.UUID, db: Session = Depends(get_db)) -> Templ
     version = db.get(TemplateVersion, template.current_version_id) if template.current_version_id else None
     if version is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template has no version.")
+    if not _visible_to(user, template, version):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
 
     return _to_template_out(template, version)
 
 
 @router.get("/{template_id}/download")
-def download_template(template_id: uuid.UUID, db: Session = Depends(get_db)) -> StreamingResponse:
+def download_template(
+    template_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> StreamingResponse:
     template = db.get(Template, template_id)
     if template is None or template.status == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
@@ -354,6 +451,8 @@ def download_template(template_id: uuid.UUID, db: Session = Depends(get_db)) -> 
     version = db.get(TemplateVersion, template.current_version_id) if template.current_version_id else None
     if version is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template has no version.")
+    if not _visible_to(user, template, version):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
 
     try:
         body = download_file(version.storage_key)

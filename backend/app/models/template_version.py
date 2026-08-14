@@ -2,11 +2,27 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# Review states for a single version. A new upload starts `pending` and is not
+# in the library until an admin moves it to `approved`.
+APPROVAL_PENDING = "pending"
+APPROVAL_APPROVED = "approved"
+APPROVAL_REJECTED = "rejected"
+APPROVAL_STATUSES = (APPROVAL_PENDING, APPROVAL_APPROVED, APPROVAL_REJECTED)
 
 
 class TemplateVersion(Base):
@@ -15,6 +31,10 @@ class TemplateVersion(Base):
         UniqueConstraint("template_id", "version_number", name="uq_template_versions_template_id_version_number"),
         UniqueConstraint("storage_bucket", "storage_key", name="uq_template_versions_bucket_key"),
         CheckConstraint("upload_status IN ('uploaded', 'failed')", name="ck_template_versions_upload_status"),
+        CheckConstraint(
+            "approval_status IN ('pending', 'approved', 'rejected')",
+            name="ck_template_versions_approval_status",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -37,4 +57,23 @@ class TemplateVersion(Base):
     # included, because the package-integrity claim is *which* parts survived --
     # a stored count could never reconstruct that.
     fingerprint: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    # ── review state ──────────────────────────────────────────────────────
+    # Approval lives on the *version*, not the template: v2 of an approved
+    # template is an unreviewed document and must not inherit v1's approval.
+    # This is what `GET /templates` filters on, so an unapproved upload is
+    # genuinely absent from the library rather than merely labelled.
+    approval_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=APPROVAL_PENDING, index=True
+    )
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # The reviewer's own words, shown to the submitter. Required on a rejection
+    # -- "no" without a reason gives the submitter nothing to act on.
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
