@@ -17,17 +17,20 @@ either one. Email is stored lowercased by `app.core.security.normalize_email`,
 which makes the plain unique index a genuine case-insensitive constraint and
 avoids needing the citext extension on RDS.
 
-**On the revision id.** This is `0004_auth`, not `0004`, and that is not a typo.
-`feature/change-spec-compile` already carries a revision identified as `0004`,
-and two files claiming one id cannot coexist in a script directory -- Alembic
-rejects the whole tree, not just the duplicate. Both branches legitimately
-follow `0003`, so this is an ordinary parallel-branch history: once the other
-merges there are two heads off `0003`, and whoever merges second runs
-`alembic merge` to join them. Numbering this `0005` would be worse -- it would
-claim to depend on work it has never seen.
+**On the revision id.** This is `0005_auth`, not a bare `0005`. It follows
+`0004` (change specs and QA runs), which this branch merged in rather than
+branching around, so the history here is linear and `alembic upgrade head`
+works from an empty database.
 
-Revision ID: 0004_auth
-Revises: 0003
+The suffix is deliberate. The shared RDS is already stamped `0005` by a
+migration creating `generation_sessions` and `question_plans` that is on no
+pushed branch. Taking the bare `0005` would collide with it the moment its
+author pushes, and Alembic rejects an entire script directory over one
+duplicate id rather than just the duplicate. A distinct id costs nothing and
+leaves that migration its number.
+
+Revision ID: 0005_auth
+Revises: 0004
 Create Date: 2026-08-14
 
 """
@@ -37,8 +40,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0004_auth"
-down_revision: Union[str, None] = "0003"
+revision: str = "0005_auth"
+down_revision: Union[str, None] = "0004"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
