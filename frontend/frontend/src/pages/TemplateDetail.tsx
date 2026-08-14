@@ -191,8 +191,8 @@ export function TemplateDetail() {
             <div className="min-w-0">
               <div className="text-body-md font-semibold text-ink">
                 {doc.approval_status === 'rejected'
-                  ? 'Changes requested by doc control'
-                  : 'Waiting on doc control'}
+                  ? 'Rejected by an admin'
+                  : 'Waiting on an admin'}
               </div>
               <p className="text-body-md text-neutral-700 m-0">
                 {doc.approval_status === 'rejected'
