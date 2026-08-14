@@ -39,8 +39,11 @@ from app.conversation.context import assemble_context
 from app.conversation.deriver import derive_values
 from app.conversation.extractor import extract_answer
 from app.conversation.planner import PlannedQuestion, plan_questions
+from app.conversation.scope import addressable_ids, askable
 from app.conversation.state import (
+    TURN_INSTRUCTION,
     SessionProgress,
+    answered_count,
     load_question_plan,
     record_turn,
     save_question_plan,
@@ -61,6 +64,7 @@ from app.schemas.session import (
     AnswerIn,
     AnswerOut,
     ChipOut,
+    InstructionIn,
     ProgressOut,
     QuestionOut,
     SessionCompileIn,
@@ -111,7 +115,14 @@ def _template_meta(template: Template) -> dict[str, Any]:
 
 
 def _fields_total(schema: Any) -> int:
-    return sum(1 for r in schema.regions if r.editable and not r.protected)
+    """The denominator of "26 of 31 fields": what the interview sets out to fill.
+
+    `askable`, not `addressable`. A heading is writable on request but is never
+    raised by a question and never derived, so counting one would put a field in
+    the denominator that no answer can move -- the counter would read worse the
+    more headings a document has, for no reason a user could see.
+    """
+    return len(askable(schema))
 
 
 def _progress(
@@ -120,7 +131,7 @@ def _progress(
     derived = (session.derived_values or {}).get("values", {})
     filled = session.filled_values or {}
     return SessionProgress(
-        answered=len(session.turns or []),
+        answered=answered_count(session),
         total_questions=len(questions),
         # Union, not sum. The deriver skips regions already in `filled_values`,
         # so the two are disjoint *when it runs* -- but a review-screen edit
@@ -164,7 +175,7 @@ def _question_out(question: PlannedQuestion) -> QuestionOut:
 def _current(
     session: GenerationSession, questions: list[PlannedQuestion]
 ) -> PlannedQuestion | None:
-    answered = len(session.turns or [])
+    answered = answered_count(session)
     return questions[answered] if answered < len(questions) else None
 
 
@@ -278,6 +289,64 @@ def start_session(
     )
 
 
+def _read_message(
+    schema: Any,
+    text: str,
+    *,
+    asked_regions: list[str],
+    question_text: str | None,
+) -> tuple[dict[str, Any], dict[str, Any], list[ChipOut], bool, list[str]]:
+    """One user message → `(answered, volunteered, chips, degraded, warnings)`.
+
+    Shared by `POST /answer` and `POST /instruct`, which differ only in whether
+    a question was on the table. Both read the message against the **whole**
+    addressable document rather than one cluster: a person answering "the venue
+    was Room 2, and Priya is chairing the next one" has supplied two things, and
+    the second used to be parsed against nothing and dropped without a word. See
+    `app.conversation.extractor` for why the wider enum is not a wider hole --
+    it still contains only ids the detector found in these bytes, and every gate
+    below the deterministic boundary is unchanged.
+
+    The warnings are the other half of "any valid input is accepted": a message
+    that lands nowhere says so, out loud, on the turn it happened.
+    """
+    extraction = extract_answer(
+        schema,
+        text,
+        asked_regions,
+        also_regions=addressable_ids(schema),
+        question_text=question_text,
+    )
+    labels = _labels(schema)
+    chips = [ChipOut(**c) for c in extraction.chips(labels)]
+    degraded = not extraction.ok
+    warnings: list[str] = []
+
+    if degraded:
+        warnings.append(
+            "The extractor was unavailable; your answer was kept and can be re-read later."
+        )
+    elif not extraction.values and not extraction.volunteered and text.strip():
+        # The user typed something real and none of it could be placed. Saying
+        # so is the guardrail: silence here is indistinguishable from success,
+        # and they would find out at the review screen or not at all.
+        warnings.append(
+            "None of that could be matched to a field in this document. Try naming the "
+            "field you mean, or set it directly on the review screen."
+        )
+
+    if extraction.volunteered:
+        named = ", ".join(
+            labels.get(rid, rid) for rid in list(extraction.volunteered)[:4]
+        )
+        more = len(extraction.volunteered) - 4
+        warnings.append(
+            f"Also captured: {named}" + (f" and {more} more" if more > 0 else "") + "."
+        )
+
+    return extraction.values, extraction.volunteered, chips, degraded, warnings
+
+
 @router.post("/{session_id}/answer", response_model=AnswerOut)
 def answer(
     session_id: uuid.UUID, request: AnswerIn, db: Session = Depends(get_db)
@@ -313,22 +382,16 @@ def answer(
     warnings: list[str] = []
     if request.skip:
         extraction_values: dict[str, Any] = {}
+        volunteered: dict[str, Any] = {}
         chips: list[ChipOut] = []
         degraded = False
     else:
-        extraction = extract_answer(
+        extraction_values, volunteered, chips, degraded, warnings = _read_message(
             schema,
             request.answer,
-            current.covers_regions,
+            asked_regions=current.covers_regions,
             question_text=current.question_text,
         )
-        extraction_values = extraction.values
-        chips = [ChipOut(**c) for c in extraction.chips(_labels(schema))]
-        degraded = not extraction.ok
-        if degraded:
-            warnings.append(
-                "The extractor was unavailable; your answer was kept and can be re-read later."
-            )
 
     record_turn(
         session,
@@ -336,6 +399,7 @@ def answer(
         question_text=current.question_text,
         answer=request.answer,
         extracted=extraction_values,
+        volunteered=volunteered,
         skipped=request.skip,
         degraded=degraded,
     )
@@ -385,9 +449,99 @@ def answer(
     return AnswerOut(
         session_id=session.id,
         extracted=extraction_values,
+        volunteered=volunteered,
         chips=chips,
         derived=derived_out,
         next_question=_question_out(next_question) if next_question else None,
+        progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
+        degraded=degraded,
+        warnings=warnings,
+    )
+
+
+@router.post("/{session_id}/instruct", response_model=AnswerOut)
+def instruct(
+    session_id: uuid.UUID, request: InstructionIn, db: Session = Depends(get_db)
+) -> AnswerOut:
+    """Apply a free-form edit to the document. Answers no question.
+
+    *"Change the heading to Q3 Review."* *"The venue should say Room 2."* These
+    are not answers -- there may be no question left to answer -- and before this
+    route there was nowhere to put them. The interview ran out of questions, the
+    session stayed `active`, and `POST /answer` returned a 409 to anyone who
+    still had something to say.
+
+    Three properties make it safe to accept an imperative here:
+
+    * **It cannot move the interview.** The turn is recorded as an instruction,
+      and `answered_count` skips those, so an aside never consumes a question
+      the user has not been asked.
+    * **It cannot reach a region the detector did not find.** The extractor's
+      enum is `scope.addressable`, and `plan_change_spec` and each compiler's
+      pre-flight re-refuse a protected or non-editable target below it. Format
+      and package integrity are not this endpoint's promise to keep -- they are
+      structural, one layer down, and unchanged by anything said up here.
+    * **It outranks derivation, not the reverse.** The value lands in
+      `filled_values`, which `plan_change_spec` prefers over anything stage ⑥
+      concluded. A user correcting the document has the last word.
+
+    The deriver deliberately does not re-run: it fills what is empty, and an
+    instruction is a statement about a region the user is already thinking about.
+    """
+    session = _session(db, session_id)
+    if session.status != STATUS_ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This session is {session.status} and no longer takes edits.",
+        )
+
+    text = (request.instruction or "").strip()
+    if not text:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="An instruction cannot be empty.",
+        )
+
+    template, version, schema = _context_for(db, session)
+    questions = load_question_plan(db, version.id)
+
+    # No asked cluster: every addressable region is equally in play, which is
+    # what "obey the instruction" means when nothing was asked.
+    values, volunteered, chips, degraded, warnings = _read_message(
+        schema, text, asked_regions=[], question_text=None
+    )
+
+    record_turn(
+        session,
+        question_id="",
+        question_text="",
+        answer=text,
+        extracted=values,
+        volunteered=volunteered,
+        kind=TURN_INSTRUCTION,
+        degraded=degraded,
+    )
+    db.commit()
+    db.refresh(session)
+
+    logger.info(
+        "session %s instruction set %d region(s) on %s",
+        session.id,
+        len(values) + len(volunteered),
+        template.title,
+    )
+
+    # Unchanged by definition -- an instruction does not answer a question -- but
+    # returned so the chat screen can re-render from one response shape.
+    pending = _current(session, questions)
+
+    return AnswerOut(
+        session_id=session.id,
+        extracted=values,
+        volunteered=volunteered,
+        chips=chips,
+        derived={},
+        next_question=_question_out(pending) if pending else None,
         progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
         degraded=degraded,
         warnings=warnings,

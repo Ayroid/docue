@@ -44,7 +44,32 @@ class Response:
 
 class Client:
     """urllib, shaped like the requests API. stdlib only, on purpose -- this
-    script must run against a checkout with nothing extra installed."""
+    script must run against a checkout with nothing extra installed.
+
+    Carries a bearer token: `/compile` and `/commit` take `current_user`, so an
+    unauthenticated client gets a 401 where this script expects a 200 and the
+    commit checks below prove nothing. The token is a throwaway account
+    registered through the real OTP path, exactly as the other live scripts do.
+    """
+
+    def __init__(self) -> None:
+        self.token: str | None = None
+
+    def sign_in(self, tag: str) -> str:
+        email = f"e2e-fixes-{tag}-{uuid.uuid4().hex[:8]}@example.com"
+        sent = self.post(
+            f"{BASE}/auth/register", {"email": email, "password": "Passw0rd!e2e"}
+        )
+        sent.raise_for_status()
+        code = sent.json().get("debug_code")
+        if not code:
+            raise SystemExit(
+                "OTP not echoed; needs APP_ENV=local, OTP_DEBUG=true and no SMTP_HOST."
+            )
+        verified = self.post(f"{BASE}/auth/verify-email", {"email": email, "code": code})
+        verified.raise_for_status()
+        self.token = verified.json()["access_token"]
+        return email
 
     def request(self, method: str, url: str, json_body=None) -> Response:
         data = None
@@ -52,6 +77,8 @@ class Client:
         if json_body is not None:
             data = json.dumps(json_body).encode()
             headers["Content-Type"] = "application/json"
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -107,6 +134,8 @@ def main() -> int:
     if client.get("http://127.0.0.1:8000/health").status_code != 200:
         raise SystemExit("backend is not answering on 127.0.0.1:8000")
 
+    print(f"Signed in as {client.sign_in('main')}")
+
     template = _mom(client)
     print(f"Template: {template['title']} ({template['format']})\n")
 
@@ -123,17 +152,57 @@ def main() -> int:
     skipped_regions = set(skipped_q["covers_regions"])
     _answer(client, sid, skipped_q["question_id"], skip=True)
 
+    # Deliberately says nothing about the skipped cluster, so the only way those
+    # regions could fill is by inference -- which is the thing skipping forbids.
     for q in questions[1:]:
-        _answer(client, sid, q["question_id"], text="Conference Room 4 on 2026-08-22")
+        _answer(
+            client,
+            sid,
+            q["question_id"],
+            text="Cycle 2 of the AP automation workshop. Ravi is sharing the header "
+            "field mapping by Friday.",
+        )
 
     state = client.get(f"{BASE}/sessions/{sid}").json()
-    touched = set(state["filled_values"]) | set(state["derived_values"])
-    leaked = skipped_regions & touched
-    assert not leaked, f"skipped question's regions were filled anyway: {leaked}"
+    leaked = skipped_regions & set(state["derived_values"])
+    assert not leaked, f"skipped question's regions were derived anyway: {leaked}"
     ok(
-        "skipped regions stay empty",
-        f"{len(skipped_regions)} region(s) skipped, none filled or derived",
+        "a skipped question's regions are never derived",
+        f"{len(skipped_regions)} region(s) skipped, none inferred",
     )
+
+    # ...but the user outranks their own earlier skip. Skipping suppresses
+    # *inference*, not the person: a value they go on to state explicitly must
+    # land, or the system is discarding what someone typed in front of it. This
+    # check and the one above are the two halves of the same rule and only make
+    # sense together.
+    target = sorted(skipped_regions)[0]
+    field = target.split(".")[-1].replace("_", " ")
+    value = "2026-09-01" if "date" in field else "Room 9"
+    before_answered = state["progress"]["answered"]
+
+    r = client.post(
+        f"{BASE}/sessions/{sid}/instruct",
+        json={"instruction": f"Change the {field} to {value}."},
+    )
+    assert r.status_code == 200, f"instruct returned {r.status_code}: {r.text[:200]}"
+    after = client.get(f"{BASE}/sessions/{sid}").json()
+
+    assert target in after["filled_values"], (
+        f"'Change the {field} to {value}' did not reach {target}. filled="
+        f"{sorted(after['filled_values'])}. This is a live-model result: the "
+        "instruction was accepted but nothing was extracted from it."
+    )
+    ok(
+        "an explicit instruction outranks an earlier skip",
+        f"{target} = {after['filled_values'][target]!r}",
+    )
+
+    assert after["progress"]["answered"] == before_answered, (
+        f"the instruction advanced the interview {before_answered} -> "
+        f"{after['progress']['answered']}; a question would be skipped unasked"
+    )
+    ok("an instruction does not advance the interview", f"still {before_answered} answered")
 
     # ── 2. dry run does not change status ─────────────────────────────────
     # The invariant is about status, and it must hold whether the compile

@@ -27,6 +27,7 @@ from typing import Any
 
 from app.ai.bedrock import BedrockError, complete_json
 from app.ai.prompts import CONTEXT_SYSTEM, CONTEXT_VERSION
+from app.conversation.scope import askable
 
 logger = logging.getLogger(__name__)
 
@@ -103,14 +104,19 @@ class ContextResult:
 
 
 def _askable(schema: Any) -> list[Any]:
-    """The regions a conversation may touch at all.
+    """The regions the interview may raise. See `app.conversation.scope`.
 
     Non-editable regions are excluded here rather than filtered later, and that
     is not just an optimisation: showing the model a protected region invites it
     to reason about writing one. Branding, formulas, the Instruction sheet and
     anything unclassified never enter the conversation's vocabulary.
+
+    Headings are excluded too, one step further out: they are writable, but only
+    when a user says to change one. Bucketing a heading here would put it in
+    front of the planner and the deriver, and "invent a title because the
+    document has one" is precisely the outcome that costs nothing to prevent.
     """
-    return [r for r in schema.regions if r.editable and not r.protected]
+    return askable(schema)
 
 
 def _region_payload(region: Any) -> dict[str, Any]:

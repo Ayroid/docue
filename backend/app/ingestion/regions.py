@@ -82,13 +82,19 @@ _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
 # kind -> (editable, protected). `protected` is what the compiler pre-flight
 # refuses to write through; `editable` is what the generation agent may offer.
+#
+# `title` is editable but is held out of the interview by
+# `app.conversation.scope.askable`, so no stage ever *proposes* a heading -- it
+# is writable only when a user says to change it. It was `editable=False` here,
+# which stopped the invention but also made "change the heading to Q3 Review"
+# unexpressible; the split belongs in the conversation, not in the detector.
 _WRITABILITY: dict[str, tuple[bool, bool]] = {
     "field": (True, False),
     "field_empty": (True, False),
     "table_loop": (True, False),
     "table_data": (True, False),
     "repeating_block": (True, False),
-    "title": (False, False),
+    "title": (True, False),
     "history": (False, False),  # system-written on publish, not user-written
     "branding": (False, True),
     "derived": (False, True),

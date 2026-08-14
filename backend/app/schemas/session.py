@@ -40,10 +40,24 @@ class ProgressOut(BaseModel):
 
 
 class TurnOut(BaseModel):
+    kind: str = Field(
+        default="answer",
+        description=(
+            "`answer` for a reply to a planned question, `instruction` for a free-form "
+            "edit. Only answers advance the interview."
+        ),
+    )
     question_id: str
     question_text: str
     answer: str
     extracted: dict[str, Any] = Field(default_factory=dict)
+    volunteered: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Values the same message supplied about regions this question did not ask "
+            "about. Written like any other answer; kept separate so the chat can say so."
+        ),
+    )
     skipped: bool = False
     degraded: bool = Field(
         default=False, description="The extractor was unavailable; the raw answer was kept."
@@ -74,16 +88,45 @@ class AnswerIn(BaseModel):
     )
 
 
+class InstructionIn(BaseModel):
+    """A free-form edit aimed at the document rather than at a question.
+
+    "Change the heading to Q3 Review", "the venue should say Room 2". Separate
+    from `AnswerIn` because it answers nothing: it names no question, does not
+    advance the interview, and stays available after the last question has been
+    answered -- which is exactly when someone reads the preview and wants a word
+    changed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: str
+
+
 class ChipOut(BaseModel):
     """What the extractor pulled out, for the chip row under the user's message."""
 
     key: str
     value: str
+    source: str = Field(
+        default="answer",
+        description=(
+            "`answer` if the question asked for it, `volunteered` if the message "
+            "supplied it about some other part of the document."
+        ),
+    )
 
 
 class AnswerOut(BaseModel):
     session_id: uuid.UUID
     extracted: dict[str, Any] = Field(default_factory=dict)
+    volunteered: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Values this message supplied about regions the question did not ask about, "
+            "including any the user directed by name. Already written."
+        ),
+    )
     chips: list[ChipOut] = Field(default_factory=list)
     derived: dict[str, Any] = Field(
         default_factory=dict,

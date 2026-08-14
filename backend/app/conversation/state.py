@@ -27,12 +27,21 @@ from app.models.question_plan import QuestionPlan
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "TURN_ANSWER",
+    "TURN_INSTRUCTION",
     "SessionProgress",
+    "answered_count",
     "load_question_plan",
     "record_turn",
     "save_question_plan",
     "session_questions",
 ]
+
+# What a turn was. Only an answer advances the interview -- an instruction is a
+# turn in the transcript and nowhere else, which is what keeps "change the
+# heading" from consuming the next question.
+TURN_ANSWER = "answer"
+TURN_INSTRUCTION = "instruction"
 
 
 @dataclass
@@ -57,6 +66,22 @@ class SessionProgress:
             "fields_filled": self.fields_filled,
             "fields_total": self.fields_total,
         }
+
+
+def answered_count(session: GenerationSession) -> int:
+    """How many planned questions have been answered.
+
+    Not `len(turns)`. A free-form instruction is stored as a turn so the chat
+    transcript replays in the order it happened, and counting it would advance
+    the question pointer -- one aside would silently skip a question and the
+    user would never be asked it. Turns written before instructions existed
+    carry no `kind` and are answers, which is what the default says.
+    """
+    return sum(
+        1
+        for turn in session.turns or []
+        if turn.get("kind", TURN_ANSWER) != TURN_INSTRUCTION
+    )
 
 
 def save_question_plan(
@@ -165,10 +190,17 @@ def record_turn(
     question_text: str,
     answer: str,
     extracted: dict[str, Any],
+    volunteered: dict[str, Any] | None = None,
+    kind: str = TURN_ANSWER,
     skipped: bool = False,
     degraded: bool = False,
 ) -> None:
     """Append one turn and merge its values into `filled_values`.
+
+    `extracted` is what the question asked for; `volunteered` is what the same
+    message supplied about the rest of the document. Both are the user's own
+    words and both are written -- they are stored apart so a reloaded chat can
+    still show which was which, and so the two counts are separable in a log.
 
     The raw answer is stored **whether or not extraction worked**. A turn whose
     extractor call failed is not lost -- the user's words are on the record and
@@ -179,22 +211,28 @@ def record_turn(
     not track mutation inside a JSONB value, and an in-place `append` would be
     silently discarded on commit. This has bitten this codebase before.
     """
+    volunteered = volunteered or {}
     turns = list(session.turns or [])
     turns.append(
         {
+            "kind": kind,
             "question_id": question_id,
             "question_text": question_text,
             "answer": answer,
             "extracted": extracted,
+            "volunteered": volunteered,
             "skipped": skipped,
             "degraded": degraded,
         }
     )
     session.turns = turns
 
-    if extracted:
+    if extracted or volunteered:
         filled = dict(session.filled_values or {})
+        # Volunteered first, so a region named in both keeps the value the
+        # question was actually about.
+        filled.update(volunteered)
         filled.update(extracted)
         session.filled_values = filled
 
-    session.current_step = len(turns)
+    session.current_step = answered_count(session)

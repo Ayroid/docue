@@ -116,13 +116,17 @@ _CAPTION_COUNT_RE = re.compile(r"\((\d+)\)")
 # kind -> (editable, protected). Identical mapping to the xlsx detector's, and
 # for the same reason: `protected` is what the compiler pre-flight refuses to
 # write through, `editable` is what the generation agent may offer.
+#
+# `title` is editable but held out of the interview by
+# `app.conversation.scope.askable` -- see the note in the xlsx detector. A
+# heading is writable on an explicit instruction and proposed by nothing.
 _WRITABILITY: dict[str, tuple[bool, bool]] = {
     "field": (True, False),
     "field_empty": (True, False),
     "table_loop": (True, False),
     "table_data": (True, False),
     "repeating_block": (True, False),
-    "title": (False, False),
+    "title": (True, False),
     "history": (False, False),  # system-written on publish, not user-written
     "branding": (False, True),
     "derived": (False, True),
@@ -444,6 +448,18 @@ class _DocxDetector:
         notes: dict[str, Any] | None = None,
     ) -> Region:
         editable, protected = _WRITABILITY[kind]
+
+        # Text held inside a `<w:hyperlink>` is not owned by the paragraph's runs,
+        # so no run-level write can reach it. A region like that is not editable
+        # whatever its kind says, and enforcing it here rather than at each
+        # detector means the invariant holds for kinds added later too.
+        #
+        # This was latent until `title` became editable: every kind that could
+        # carry an incomplete run span was already non-editable, so the BRD's
+        # nine hyperlinked headings had never been offered to anything.
+        if editable and (notes or {}).get("run_text_complete") is False:
+            editable = False
+
         local_slug = _slug(id_hint or label or locator.ref, kind)
         base = f"doc.{local_slug}"
         region_id = base
