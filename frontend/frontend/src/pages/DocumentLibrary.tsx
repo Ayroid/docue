@@ -7,6 +7,7 @@ import { useRealTemplates } from '@/features/document-library/useRealTemplates'
 import { saveTemplateToDisk } from '@/features/document-library/saveToDisk'
 import { DocumentPreview } from '@/features/document-preview/DocumentPreview'
 import { Button } from '@/components/ui/button'
+import { Icon } from '@/components/ui/icon'
 import { Tag } from '@/components/ui/tag'
 import { Segmented } from '@/components/ui/segmented'
 import { Panel, SectionLabel } from '@/components/ui/table'
@@ -78,10 +79,17 @@ export function DocumentLibrary() {
 
   return (
     <PageBody>
-      <PageHeading
-        title="Document library"
-        subtitle="Every uploaded template, rendered in the browser — no Office install, no download needed."
-      />
+      <div className="flex items-center gap-4 flex-wrap">
+        <PageHeading
+          className="flex-1 min-w-0"
+          title="Document library"
+          subtitle="Every uploaded template, rendered in the browser — no Office install, no download needed."
+        />
+        <Button variant="primary" className="flex-none" onClick={() => navigate('/upload')}>
+          <Icon name="add" size={18} />
+          Upload template
+        </Button>
+      </div>
 
       {error ? (
         <Panel>

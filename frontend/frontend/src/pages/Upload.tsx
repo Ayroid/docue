@@ -91,7 +91,6 @@ export function Upload() {
         name || stored?.title || file.name.replace(/\.[^.]+$/, ''),
         fmt,
         `.${storedFormat ?? 'file'} · ${size} · submitted just now`,
-        templateId,
       )
     } catch (err) {
       setError(err instanceof TemplateApiError ? err.message : 'Something went wrong uploading that file.')

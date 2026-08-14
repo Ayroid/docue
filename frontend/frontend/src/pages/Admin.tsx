@@ -1,140 +1,246 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { statusClass } from '@/data/catalog'
 import { useHub } from '@/store/HubProvider'
-import { getTemplate, TemplateApiError, type TemplateOut } from '@/services/templates'
+import {
+  approveVersion,
+  listApprovals,
+  rejectVersion,
+  type Approval,
+  type ApprovalStatus,
+} from '@/services/notifications'
+import { AuthApiError } from '@/services/auth'
+import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
 import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
-import { EmptyState, FormatChip, PageBody, PageHeading } from '@/components/common'
+import { Textarea } from '@/components/ui/input'
 import { Icon } from '@/components/ui/icon'
+import { Segmented } from '@/components/ui/segmented'
 
-interface VerifyState {
-  rowId: number
-  loading: boolean
-  result: TemplateOut | null
-  error: string | null
+const TABS: { key: ApprovalStatus | 'all'; label: string }[] = [
+  { key: 'pending', label: 'Awaiting review' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'all', label: 'All' },
+]
+
+const STATUS_CLASS: Record<ApprovalStatus, string> = {
+  pending: 'bg-accent2-100 text-accent2-900',
+  approved: 'bg-accent-100 text-accent-700',
+  rejected: 'bg-[color:var(--md-error)]/10 text-[color:var(--md-error)]',
+}
+
+const STATUS_LABEL: Record<ApprovalStatus, string> = {
+  pending: 'Awaiting review',
+  approved: 'Approved',
+  rejected: 'Rejected',
 }
 
 /**
- * Doc control's view of what has come in.
+ * Doc control's review queue, read from `GET /admin/approvals`.
  *
- * Only real uploads appear — templates POSTed to the backend during this
- * visit. The page previously padded itself out with five invented
- * submissions, a four-item "ingestion pipeline" and a table of access groups
- * with member counts, none of which corresponded to anything; the stat tiles
- * above them counted those invented rows.
+ * This used to list templates uploaded *in this browser tab* and "approve"
+ * them by flipping a label in memory — the server published everything on
+ * upload regardless, so the button recorded a decision that changed nothing
+ * and the list was empty after a reload.
  *
- * Uploads are session-scoped because the server has no submission-history
- * route, so a reload legitimately empties this list.
+ * Approving now actually publishes: an unapproved version is absent from
+ * `GET /templates` and from search, so until someone clicks here the template
+ * genuinely is not in the library. Both decisions notify the submitter in the
+ * hub and by email.
  */
 export function Admin() {
-  const { uploads, approveUpload, removeUpload, fireToast } = useHub()
   const navigate = useNavigate()
-  const [verify, setVerify] = useState<VerifyState | null>(null)
+  const { fireToast } = useHub()
 
-  const verifyBackend = async (rowId: number, backendId: string) => {
-    setVerify({ rowId, loading: true, result: null, error: null })
+  const [tab, setTab] = useState<ApprovalStatus | 'all'>('pending')
+  const [queue, setQueue] = useState<Approval[]>([])
+  const [pending, setPending] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  /** The row currently being decided, so only its buttons show a busy state. */
+  const [busyId, setBusyId] = useState<string | null>(null)
+  /** Open when rejecting — the note is mandatory, so it needs a real prompt. */
+  const [rejecting, setRejecting] = useState<Approval | null>(null)
+  const [note, setNote] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
     try {
-      const result = await getTemplate(backendId)
-      setVerify({ rowId, loading: false, result, error: null })
+      const result = await listApprovals(tab === 'all' ? undefined : tab)
+      setQueue(result.items)
+      setPending(result.pending)
+      setError(null)
     } catch (err) {
-      setVerify({
-        rowId,
-        loading: false,
-        result: null,
-        error: err instanceof TemplateApiError ? err.message : 'Verification failed.',
-      })
+      setError(err instanceof AuthApiError ? err.message : 'Could not load the approval queue.')
+    } finally {
+      setLoading(false)
+    }
+  }, [tab])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const approve = async (row: Approval) => {
+    setBusyId(row.version_id)
+    try {
+      await approveVersion(row.version_id)
+      fireToast(`Approved ${row.title} — published to the library`)
+      await load()
+    } catch (err) {
+      setError(err instanceof AuthApiError ? err.message : 'Could not approve that version.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const confirmReject = async () => {
+    if (!rejecting) return
+    setBusyId(rejecting.version_id)
+    try {
+      await rejectVersion(rejecting.version_id, note.trim())
+      fireToast(`Sent ${rejecting.title} back to ${rejecting.submitted_by_name ?? 'its submitter'}`)
+      setRejecting(null)
+      setNote('')
+      await load()
+    } catch (err) {
+      setError(err instanceof AuthApiError ? err.message : 'Could not record that decision.')
+    } finally {
+      setBusyId(null)
     }
   }
 
   return (
     <PageBody>
-      <PageHeading title="Admin" subtitle="Doc control — templates submitted in this session." />
+      <PageHeading
+        title="Admin"
+        subtitle="Doc control — every template version waiting on a decision."
+      />
 
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
-          <h2 className="text-title-lg m-0">Manage templates</h2>
-          <p className="text-body-md text-neutral-700 m-0">Administrator view of templates submitted in this session.</p>
+          <h2 className="text-title-lg m-0">Approval queue</h2>
+          <p className="text-body-md text-neutral-700 m-0">
+            {pending === 0
+              ? 'Nothing is waiting on you.'
+              : `${pending} version${pending === 1 ? '' : 's'} awaiting review. Nothing here is in the library until it is approved.`}
+          </p>
         </div>
-        <Button variant="primary" className="flex-none" onClick={() => navigate('/upload')}>
-          <Icon name="add" size={18} />
-          Upload template
+        <Button variant="secondary" className="flex-none" onClick={() => void load()} disabled={loading}>
+          <Icon name="refresh" size={18} />
+          {loading ? 'Refreshing…' : 'Refresh'}
         </Button>
       </div>
 
-      {uploads.length ? (
-        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
-          {uploads.map((u) => (
-            <article key={u.id} className="relative bg-surface border border-divider rounded-card p-5 flex flex-col gap-4 shadow-elev-sm">
-              <span className={`${statusClass(u.status)} absolute top-4 right-4 uppercase`}>{u.status}</span>
+      <Segmented
+        name="approval-filter"
+        value={tab}
+        onChange={setTab}
+        options={TABS.map((t) => ({ value: t.key, label: t.label }))}
+      />
 
-              <FormatChip size={40}>{u.fmt}</FormatChip>
+      {error ? (
+        <p className="text-body-md text-[color:var(--md-error)] bg-[color:var(--md-error)]/10 border border-[color:var(--md-error)]/30 rounded-lg py-[10px] px-3 m-0">
+          {error}
+        </p>
+      ) : null}
+
+      {queue.length ? (
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
+          {queue.map((row) => (
+            <article
+              key={row.version_id}
+              className="relative bg-surface border border-divider rounded-card p-5 flex flex-col gap-4 shadow-elev-sm"
+            >
+              <span
+                className={`absolute top-4 right-4 uppercase text-[11px] font-semibold tracking-[.06em] rounded-tag py-[3px] px-[9px] ${STATUS_CLASS[row.approval_status]}`}
+              >
+                {STATUS_LABEL[row.approval_status]}
+              </span>
+
+              <FormatChip size={40}>{CHIP_BY_FORMAT[row.format]}</FormatChip>
 
               <div className="min-w-0">
-                <h3 className="text-title-lg m-0 mb-1 truncate pr-24">{u.name}</h3>
-                <p className="text-body-md text-neutral-700 m-0">{u.meta}</p>
+                <h3 className="text-title-lg m-0 mb-1 truncate pr-28">{row.title}</h3>
+                <p className="text-body-md text-neutral-700 m-0 truncate">
+                  {row.original_filename} · v{row.version_number} · {formatBytes(row.size_bytes)}
+                </p>
               </div>
+
+              {row.purpose ? (
+                <p className="text-body-md text-neutral-700 m-0 line-clamp-3">{row.purpose}</p>
+              ) : (
+                /* Null until the enrichment pass finishes — pending, not
+                   missing. Saying so stops a reviewer reading a blank as a
+                   broken upload. */
+                <p className="text-body-md text-neutral-600 italic m-0">
+                  Description still being generated…
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3 text-label-md border-t border-divider pt-4">
-                <div>
-                  <div className="uppercase text-neutral-600 mb-1">Stored</div>
-                  <div className="text-body-md text-ink">{u.backendId ? 'On the server' : 'Not confirmed'}</div>
+                <div className="min-w-0">
+                  <div className="uppercase text-neutral-600 mb-1">Submitted by</div>
+                  <div className="text-body-md text-ink truncate">
+                    {row.submitted_by_name ?? 'Unknown'}
+                  </div>
                 </div>
-                <div>
-                  <div className="uppercase text-neutral-600 mb-1">Note</div>
-                  <div className="text-body-md text-ink truncate">{u.note}</div>
+                <div className="min-w-0">
+                  <div className="uppercase text-neutral-600 mb-1">Submitted</div>
+                  <div className="text-body-md text-ink truncate">
+                    {new Date(row.submitted_at).toLocaleString()}
+                  </div>
                 </div>
               </div>
 
+              {row.review_note ? (
+                <div className="text-label-md border-t border-divider pt-3">
+                  <div className="uppercase text-neutral-600 mb-1">
+                    Note from {row.reviewed_by_name ?? 'the reviewer'}
+                  </div>
+                  <p className="text-body-md text-ink m-0">{row.review_note}</p>
+                </div>
+              ) : null}
+
               <div className="flex gap-2 flex-wrap mt-auto pt-1">
-                {u.backendId ? (
+                <Button asChild variant="secondary" size="sm">
+                  <a href={`/viewer/${row.template_id}`} target="_blank" rel="noopener noreferrer">
+                    <Icon name="visibility" size={16} />
+                    Open
+                  </a>
+                </Button>
+
+                {row.approval_status === 'pending' ? (
                   <>
-                    <Button asChild variant="secondary" size="sm">
-                      <a href={`/viewer/${u.backendId}`} target="_blank" rel="noopener noreferrer">
-                        <Icon name="visibility" size={16} />
-                        View
-                      </a>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto"
+                      disabled={busyId === row.version_id}
+                      onClick={() => {
+                        setRejecting(row)
+                        setNote('')
+                      }}
+                    >
+                      Request changes
                     </Button>
                     <Button
-                      variant="secondary"
+                      variant="primary"
                       size="sm"
-                      disabled={verify?.rowId === u.id && verify.loading}
-                      onClick={() => verifyBackend(u.id, u.backendId!)}
+                      disabled={busyId === row.version_id}
+                      onClick={() => void approve(row)}
                     >
-                      {verify?.rowId === u.id && verify.loading ? 'Checking…' : 'Verify'}
+                      <Icon name="check" size={16} />
+                      {busyId === row.version_id ? 'Working…' : 'Approve'}
                     </Button>
                   </>
-                ) : null}
-                {u.status === 'Approved' ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto"
-                    onClick={() => {
-                      removeUpload(u.id)
-                      fireToast(`Cleared ${u.name} from the queue`)
-                    }}
-                  >
-                    Clear
-                  </Button>
                 ) : (
-                  /* Publication is not gated by this: the server stores an
-                     uploaded template as `active` and lists it immediately, so
-                     the file is already in the library. This records the
-                     decision — a real gate needs a review state on the API. */
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="ml-auto"
-                    onClick={() => {
-                      approveUpload(u.id)
-                      fireToast(`Approved ${u.name} — live in the library`)
-                    }}
-                  >
-                    <Icon name="check" size={16} />
-                    Approve
-                  </Button>
+                  <span className="ml-auto self-center text-label-md text-neutral-600">
+                    {row.reviewed_at
+                      ? `Reviewed ${new Date(row.reviewed_at).toLocaleDateString()}`
+                      : 'Reviewed'}
+                  </span>
                 )}
               </div>
             </article>
@@ -142,53 +248,58 @@ export function Admin() {
         </div>
       ) : (
         <EmptyState
-          title="Nothing submitted yet"
-          body="Templates you upload in this session show up here so you can confirm they really landed on the server."
-          action={{ label: 'Upload a template', onClick: () => navigate('/upload') }}
+          title={loading ? 'Loading the queue…' : tab === 'pending' ? 'Nothing awaiting review' : 'Nothing here'}
+          body={
+            tab === 'pending'
+              ? 'When someone submits a template it lands here, and you are notified in the hub and by email.'
+              : 'No versions in this state yet.'
+          }
+          action={tab === 'pending' ? { label: 'Upload a template', onClick: () => navigate('/upload') } : undefined}
         />
       )}
 
       <Dialog
-        open={verify !== null}
-        onOpenChange={(open) => !open && setVerify(null)}
-        title="Backend record"
+        open={rejecting !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejecting(null)
+            setNote('')
+          }
+        }}
+        title="Request changes"
         actions={
-          <Button variant="primary" onClick={() => setVerify(null)}>
-            Done
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRejecting(null)
+                setNote('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={note.trim().length < 3 || busyId !== null}
+              onClick={() => void confirmReject()}
+            >
+              Send back
+            </Button>
+          </>
         }
       >
         <div className="dialog-body">
-          {verify?.loading ? (
-            <p className="m-0">Checking the server…</p>
-          ) : verify?.error ? (
-            <p className="m-0 text-accent2-700">{verify.error}</p>
-          ) : verify?.result ? (
-            <div className="flex flex-col gap-[10px] text-[13.5px]">
-              <p className="m-0 opacity-70">
-                Re-read directly from <code>GET /templates/{'{id}'}</code> — this confirms the file is genuinely
-                persisted in S3 and Postgres, not just accepted by the browser.
-              </p>
-              {[
-                ['Template ID', verify.result.id],
-                ['Status', verify.result.status],
-                ['Storage key', verify.result.current_version?.storage_key ?? '—'],
-                ['File hash', verify.result.current_version?.file_hash ?? '—'],
-                ['Size', verify.result.current_version ? formatBytes(verify.result.current_version.size_bytes) : '—'],
-                [
-                  'Uploaded',
-                  verify.result.current_version
-                    ? new Date(verify.result.current_version.created_at).toLocaleString()
-                    : '—',
-                ],
-              ].map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-3 border-t border-divider pt-[10px]">
-                  <span className="opacity-60">{label}</span>
-                  <span className="font-semibold text-right break-all">{value}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          <p className="m-0 mb-3 text-body-md">
+            {rejecting?.submitted_by_name ?? 'The submitter'} gets this note in the hub and by email.
+            It is the only thing telling them what to fix, so a reason is required.
+          </p>
+          <Textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={4}
+            placeholder="e.g. The revision block still says Ver. 1 — update it and re-upload."
+            autoFocus
+          />
         </div>
       </Dialog>
     </PageBody>
