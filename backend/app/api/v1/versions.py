@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.access.templates import assert_can_view_template
 from app.api.deps import optional_user
 from app.db.session import get_db
 from app.models.template import Template
@@ -60,6 +61,11 @@ def version_history(
     template = db.get(Template, template_id)
     if template is None or template.status == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such template.")
+    # Which *versions* to show is decided per caller below, and always was.
+    # Whether the caller may see the template they belong to was not asked at
+    # all, so a lineage -- titles, review notes, who submitted what and when --
+    # came back for any template id.
+    assert_can_view_template(db, user, template)
 
     versions = list(
         db.execute(

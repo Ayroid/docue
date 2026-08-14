@@ -32,6 +32,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.access.templates import load_viewable
 from app.api.deps import current_user
 from app.compiler.from_spec import SpecCompileError, compile_spec
 from app.core.config import settings
@@ -46,8 +47,8 @@ from app.models.change_spec import (
 from app.models.qa_run import OVERALL_FAIL, OVERALL_PASS, QaRun
 from app.models.generated_document import GeneratedDocument
 from app.models.template import Template
-from app.models.template_version import APPROVAL_APPROVED, TemplateVersion
-from app.models.user import ROLE_ADMIN, User
+from app.models.template_version import TemplateVersion
+from app.models.user import User
 from app.notifications.service import notify_approval_requested
 from app.schemas.change_spec import ChangeSpec
 from app.schemas.generate import CompileRequest, CompileResponse
@@ -68,19 +69,11 @@ GENERATED_PREFIX = "generated"
 DOCUMENT_PREFIX = "documents"
 
 
-def _load(db: Session, template_id: uuid.UUID, version_id: uuid.UUID | None) -> tuple[Template, TemplateVersion]:
-    template = db.get(Template, template_id)
-    if template is None or template.status == "deleted":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
-    target_id = version_id or template.current_version_id
-    if target_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template has no version.")
-    version = db.get(TemplateVersion, target_id)
-    if version is None or version.template_id != template_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Version not found for this template."
-        )
-    return template, version
+# `_load` was this module's own copy of the loader in `templates.py`, minus its
+# visibility check -- so a route that required a signed-in caller still served
+# any version of any template to whichever one turned up. It is now
+# `app.access.templates.load_viewable`, which is the same loader with the check
+# that was missing, and every call site below passes the caller it already had.
 
 
 def _next_version_number(db: Session, template_id: uuid.UUID) -> int:
@@ -108,7 +101,7 @@ def compile_change_spec_endpoint(
     user: User = Depends(current_user),
 ) -> CompileResponse:
     """Apply a Change Spec. `dry_run` returns the QA verdict and keeps nothing."""
-    template, version = _load(db, template_id, request.version_id)
+    template, version = load_viewable(db, template_id, request.version_id, user=user)
     return compile_and_store(
         db,
         template,
@@ -432,14 +425,12 @@ def download_version(
     owner, and admins. 404 rather than 403 for everyone else, matching
     `GET /templates/{id}` -- the existence of a colleague's rejected draft is
     not theirs to learn.
+
+    That check used to be written out below this docstring, which made it the
+    fourth copy of the rule in the codebase. `load_viewable` applies exactly it,
+    against the version actually named rather than the current one.
     """
-    template, version = _load(db, template_id, version_id)
-    if version.approval_status != APPROVAL_APPROVED and not (
-        user.role == ROLE_ADMIN
-        or template.owner_id == user.id
-        or version.submitted_by == user.id
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found.")
+    template, version = load_viewable(db, template_id, version_id, user=user)
 
     try:
         body = download_file(version.storage_key)
