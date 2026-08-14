@@ -58,7 +58,7 @@ def _user_from_token(token: str, db: Session) -> User:
     if user.status != STATUS_ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account is not active. Contact doc control.",
+            detail="This account is not active. Contact an admin.",
         )
     return user
 

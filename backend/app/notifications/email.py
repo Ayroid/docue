@@ -131,11 +131,11 @@ def send_template_approved(to: str, name: str, title: str, reviewer: str, note: 
 def send_template_rejected(to: str, name: str, title: str, reviewer: str, note: str) -> bool:
     return send_email(
         to,
-        f"Changes requested: {title}",
+        f"Rejected: {title}",
         f"Hi {name},\n\n"
-        f"{reviewer} reviewed your template and asked for changes:\n\n"
+        f"{reviewer} reviewed your template and rejected it:\n\n"
         f"    {title}\n\n"
-        f"Reviewer's note: {note}\n\n"
+        f"Reason: {note}\n\n"
         f"It has not been published. Upload a corrected version when it is ready.\n\n"
         f"-- TemplateHub, YMSLI\n",
     )

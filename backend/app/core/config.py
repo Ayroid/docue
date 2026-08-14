@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     seed_admin_email: str | None = None
     seed_admin_username: str = "admin"
     seed_admin_password: str | None = None
-    seed_admin_full_name: str = "Doc Control"
+    seed_admin_full_name: str = "Admin"
 
     @property
     def email_configured(self) -> bool:

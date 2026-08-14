@@ -2,6 +2,7 @@ import hashlib
 import io
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -48,7 +49,7 @@ def _visible_to(user: User | None, template: Template, version: TemplateVersion 
 
     Approved templates are public to any signed-in user. An unapproved one is
     visible only to the person who uploaded it and to admins -- the submitter
-    needs to watch their own upload through review, and doc control needs to
+    needs to watch their own upload through review, and an admin needs to
     open it to decide. Everyone else gets a 404, not a 403: the existence of a
     colleague's rejected draft is not theirs to learn.
     """
@@ -108,7 +109,7 @@ async def upload_template(
 
     **The version lands `pending` and is not in the library.** `GET /templates`
     filters on approval, so an upload is stored, ingested and searchable-ready
-    but genuinely unlisted until an admin approves it. Doc control is notified
+    but genuinely unlisted until an admin approves it. Admins are notified
     in the hub and by email as soon as the row is committed.
     """
     ext = Path(file.filename or "").suffix.lower()
@@ -147,6 +148,8 @@ async def upload_template(
         )
     buffer.seek(0)
 
+    is_admin = user.role == ROLE_ADMIN
+
     template_id = uuid.uuid4()
     version_id = uuid.uuid4()
     storage_key = f"originals/{template_id}/v1/{file.filename}"
@@ -176,8 +179,20 @@ async def upload_template(
             file_hash=hasher.hexdigest(),
             size_bytes=size,
             mime_type=MIME_TYPES[fmt],
-            approval_status=APPROVAL_PENDING,
+            # An admin's own upload is approved on arrival. The queue exists so
+            # an admin sees a document before the library does, and here the
+            # admin *is* the uploader -- routing it through would ask them to
+            # approve their own file, and leave the library missing a template
+            # they had already decided to publish.
+            #
+            # Recorded as a real decision rather than a silent exemption:
+            # `reviewed_by` names who published it and `reviewed_at` says when,
+            # so the audit trail reads the same as any other approval instead of
+            # showing an approved version nobody ever reviewed.
+            approval_status=APPROVAL_APPROVED if is_admin else APPROVAL_PENDING,
             submitted_by=user.id,
+            reviewed_by=user.id if is_admin else None,
+            reviewed_at=datetime.now(timezone.utc) if is_admin else None,
         )
         db.add(version)
         db.flush()  # template_versions row must exist before templates.current_version_id can reference it
@@ -196,14 +211,19 @@ async def upload_template(
             detail="Failed to save template metadata.",
         ) from exc
 
-    # Both run after the response is sent. Notifying doc control takes an SMTP
+    # Both run after the response is sent. Notifying the admins takes an SMTP
     # round trip per admin, and the uploader should not wait through it to be
     # told their file was accepted. The bytes are already in memory from
     # hashing, so they are handed over rather than re-fetched from S3.
     background_tasks.add_task(run_ingestion_job, job_id, template_id, version_id, payload)
-    background_tasks.add_task(
-        _announce_submission, template_id, version_id, template.title, user.id
-    )
+    # Nothing to announce when the uploader was an admin: the version is already
+    # approved, so this would mail every admin -- the uploader included -- asking
+    # them to review a decision that has been made. The queue would be empty when
+    # they followed the link.
+    if not is_admin:
+        background_tasks.add_task(
+            _announce_submission, template_id, version_id, template.title, user.id
+        )
 
     return IngestionAccepted(
         template_id=template_id,

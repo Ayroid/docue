@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
-# The two roles the product has. `admin` is doc control: it is the only role
+# The two roles the product has. `admin` is the reviewer role: it is the only one
 # that sees the approval queue and the only one that can act on it.
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
