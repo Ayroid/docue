@@ -198,6 +198,10 @@ async function detailOf(res: Response): Promise<string | null> {
  * `authHeader`. The conversation itself worked — none of those routes require a
  * caller — so the failure surfaced only at the end, as "Not signed in." on a
  * review screen that was displaying the signed-in user's name in the header.
+ *
+ * Since then every session route resolves the caller, so an unsigned request is
+ * a 401 — and a session belonging to someone else is a 404, not a 403, because
+ * confirming the id exists is itself the thing being withheld.
  */
 async function call<T>(path: string, init?: RequestInit, notFound?: string): Promise<T> {
   let res: Response
