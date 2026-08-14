@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.generate import _fetch, _load, compile_and_store
 from app.compiler.from_spec import value_rejection_reason
+from app.core.identity import CurrentActor
 from app.conversation.context import assemble_context
 from app.conversation.deriver import derive_values
 from app.conversation.extractor import extract_answer
@@ -549,6 +550,7 @@ def patch_spec_operation(
 def compile_session(
     session_id: uuid.UUID,
     request: SessionCompileIn,
+    actor: CurrentActor,
     db: Session = Depends(get_db),
 ) -> CompileResponse:
     """Compile this session's spec. `dry_run` returns QA and keeps nothing.
@@ -598,6 +600,9 @@ def compile_session(
         dry_run=request.dry_run,
         publish=request.publish,
         session_id=session.id,
+        # So the version this mints can name its author, and a promotion request
+        # raised against it later has somebody to attribute and notify.
+        actor=actor,
     )
 
     if not request.dry_run and response.overall == "pass":
@@ -612,6 +617,7 @@ def compile_session(
 def commit_session(
     session_id: uuid.UUID,
     request: SessionCompileIn,
+    actor: CurrentActor,
     db: Session = Depends(get_db),
 ) -> CompileResponse:
     """Compile for real and keep the result as a new version.
@@ -625,6 +631,7 @@ def commit_session(
         SessionCompileIn(
             dry_run=False, publish=request.publish, overrides=request.overrides
         ),
+        actor,
         db,
     )
 

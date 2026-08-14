@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.generate import router as generate_router
+from app.api.v1.promotions import router as promotions_router
 from app.api.v1.search import router as search_router
 from app.api.v1.sessions import router as sessions_router
 from app.api.v1.templates import router as templates_router
@@ -34,6 +35,10 @@ app.include_router(templates_router, prefix="/api/v1")
 app.include_router(search_router, prefix="/api/v1")
 app.include_router(generate_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
+# Registered after `templates_router` on purpose: both own paths under
+# /templates/{id}, and the more specific ones here must not shadow its
+# `GET /templates/{template_id}`.
+app.include_router(promotions_router, prefix="/api/v1")
 
 
 @app.get("/health")

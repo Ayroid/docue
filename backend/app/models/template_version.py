@@ -8,6 +8,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+LIFECYCLE_DRAFT = "draft"
+LIFECYCLE_PENDING = "pending"
+LIFECYCLE_PUBLISHED = "published"
+LIFECYCLE_SUPERSEDED = "superseded"
+
+ORIGIN_UPLOAD = "upload"
+ORIGIN_GENERATED = "generated"
+
 
 class TemplateVersion(Base):
     __tablename__ = "template_versions"
@@ -15,6 +23,11 @@ class TemplateVersion(Base):
         UniqueConstraint("template_id", "version_number", name="uq_template_versions_template_id_version_number"),
         UniqueConstraint("storage_bucket", "storage_key", name="uq_template_versions_bucket_key"),
         CheckConstraint("upload_status IN ('uploaded', 'failed')", name="ck_template_versions_upload_status"),
+        CheckConstraint(
+            "lifecycle IN ('draft', 'pending', 'published', 'superseded')",
+            name="ck_template_versions_lifecycle",
+        ),
+        CheckConstraint("origin IN ('upload', 'generated')", name="ck_template_versions_origin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -43,4 +56,24 @@ class TemplateVersion(Base):
     # included, because the package-integrity claim is *which* parts survived --
     # a stored count could never reconstruct that.
     fingerprint: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Where this version sits in the version-control story. `draft` is a
+    # generated document nobody has asked to publish; `pending` is one waiting
+    # on doc control; `published` is or was the template's current version;
+    # `superseded` is one that used to be. The last two are not redundant
+    # against `templates.current_version_id` -- that says which single version
+    # is live *now*, while `superseded` says "this was live once", which is what
+    # makes the history read as a lineage rather than a pile of files.
+    lifecycle: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=LIFECYCLE_PUBLISHED, index=True
+    )
+    # `upload` or `generated`. Derivable from `storage_key`'s prefix today,
+    # which is exactly why it is a column: the prefix is a storage detail, and
+    # the two will disagree the first time anyone reorganises the bucket.
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default=ORIGIN_UPLOAD)
+    # Who produced these bytes. Nullable because every version predating auth
+    # has no author, and `SET NULL` because deleting an account must not delete
+    # the record of what they published.
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

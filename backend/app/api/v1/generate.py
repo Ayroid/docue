@@ -42,8 +42,15 @@ from app.models.change_spec import (
     ChangeSpecRow,
 )
 from app.models.qa_run import OVERALL_FAIL, OVERALL_PASS, QaRun
+from app.core.identity import Actor
 from app.models.template import Template
-from app.models.template_version import TemplateVersion
+from app.models.template_version import (
+    LIFECYCLE_DRAFT,
+    LIFECYCLE_PUBLISHED,
+    LIFECYCLE_SUPERSEDED,
+    ORIGIN_GENERATED,
+    TemplateVersion,
+)
 from app.schemas.change_spec import ChangeSpec
 from app.schemas.generate import CompileRequest, CompileResponse
 from app.storage.s3 import delete_file, download_file, upload_file
@@ -98,6 +105,7 @@ def compile_and_store(
     dry_run: bool,
     publish: bool = False,
     session_id: uuid.UUID | None = None,
+    actor: Actor | None = None,
 ) -> CompileResponse:
     """Apply a Change Spec to a stored version. **The only path to bytes.**
 
@@ -201,12 +209,28 @@ def compile_and_store(
                 # Carried forward: the document still claims the same `Ver.` in
                 # its own revision block until publish writes back to it.
                 in_doc_version=version.in_doc_version,
+                # A compiled document is a draft until somebody promotes it --
+                # even with `publish: true`, which points the template at it
+                # below and is corrected to `published` there. Defaulting to
+                # `published` here would put every generated file into the
+                # library the moment it compiled, which is the entire thing the
+                # promotion flow exists to prevent.
+                lifecycle=LIFECYCLE_PUBLISHED if publish else LIFECYCLE_DRAFT,
+                origin=ORIGIN_GENERATED,
+                created_by_id=actor.user_id if actor else None,
             )
             db.add(result_version)
             db.flush()
             spec_row.result_version_id = result_version.id
             spec_row.status = STATUS_COMMITTED
             if publish:
+                # Whatever was current stops being current. Without this the
+                # history shows two versions claiming `published` and no way to
+                # tell which one the library actually serves.
+                if template.current_version_id:
+                    previous = db.get(TemplateVersion, template.current_version_id)
+                    if previous is not None and previous.id != result_version.id:
+                        previous.lifecycle = LIFECYCLE_SUPERSEDED
                 template.current_version_id = result_version.id
         except Exception as exc:  # noqa: BLE001
             db.rollback()
