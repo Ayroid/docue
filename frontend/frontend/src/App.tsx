@@ -87,8 +87,26 @@ export function App() {
         <Route path="/search" element={<Results />} />
         <Route path="/templates/:id" element={<TemplateDetail />} />
         <Route path="/templates/:id/update" element={<UpdateTemplate />} />
-        <Route path="/templates/:id/generate" element={<Generate />} />
-        <Route path="/generate/:sessionId/review" element={<Review />} />
+        {/* A fill session belongs to the person who started it, and the API now
+            says so on every route. Left open, these two screens let a signed-out
+            visitor answer a whole interview and then fail at "Create document"
+            — which is the wall they always hit, just late and confusingly. */}
+        <Route
+          path="/templates/:id/generate"
+          element={
+            <RequireAuth>
+              <Generate />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/generate/:sessionId/review"
+          element={
+            <RequireAuth>
+              <Review />
+            </RequireAuth>
+          }
+        />
         <Route path="/documents" element={<MyDocuments />} />
         <Route path="/documents/:id" element={<GeneratedDocument />} />
         <Route

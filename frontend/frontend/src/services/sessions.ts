@@ -11,6 +11,7 @@
  * one file to change when a field moves.
  */
 
+import { authHeader } from '@/services/auth'
 import { TemplateApiError, type TemplateFormat } from '@/services/templates'
 
 const API_BASE_URL = '/api/v1'
@@ -188,10 +189,23 @@ async function detailOf(res: Response): Promise<string | null> {
   }
 }
 
+/**
+ * Every session request, signed.
+ *
+ * The token is attached here rather than in each helper because forgetting it
+ * in one place is exactly what happened: `/compile` and `/commit` take
+ * `current_user`, and this module was the only service that never imported
+ * `authHeader`. The conversation itself worked — none of those routes require a
+ * caller — so the failure surfaced only at the end, as "Not signed in." on a
+ * review screen that was displaying the signed-in user's name in the header.
+ */
 async function call<T>(path: string, init?: RequestInit, notFound?: string): Promise<T> {
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, init)
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: { ...(init?.headers as Record<string, string> | undefined), ...authHeader() },
+    })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
