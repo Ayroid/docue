@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Fmt } from '@/data/catalog'
 
-export type Role = 'Admin' | 'Member'
 export type Tier = 'T1' | 'T2' | 'T3'
 
 /* ── Generation walkthrough state ────────────────────────────────────────
@@ -44,41 +43,29 @@ export interface Session {
   draftId?: string
 }
 
-export interface Upload {
-  id: number
-  name: string
-  fmt: Fmt
-  meta: string
-  note: string
-  status: string
-  kind: string
-  /** The real backend template id — every row here came from a real `POST /templates`. */
-  backendId?: string
-}
-
 /**
- * Session state that isn't owned by the server yet: who's signed in, the
- * sidebar, the toast, and the templates uploaded during this visit.
+ * State that isn't owned by the server yet: the sidebar, the toast, and the
+ * "sent for approval" dialog.
  *
  * It deliberately holds no template or document *content*. Those come from the
  * backend through `services/templates.ts`; this provider used to seed the app
  * with invented ones and no longer does.
+ *
+ * **It no longer holds the session either.** `loggedIn`, `login`, `logout` and
+ * `role` lived here as an in-memory boolean and a hardcoded `'Admin'`, which
+ * meant every visitor was an administrator and every refresh signed them out.
+ * All four now come from `AuthProvider`, backed by a real token.
  */
 interface HubState {
-  loggedIn: boolean
-  login: () => void
-  logout: () => void
-  role: Role
   sidebarOpen: boolean
   toggleSidebar: () => void
 
-  /** Templates uploaded in this session — cleared on reload, since the server
-      has no per-user submission history yet. */
-  uploads: Upload[]
+  /* What the confirmation dialog shows after an upload. The submission itself
+     is the server's now: it lands as a `pending` version and the Admin page
+     reads the real queue, so the session no longer keeps its own list of
+     uploads to approve against. */
   lastUpload: { name: string; fmt: Fmt; meta: string } | null
-  addUpload: (name: string, fmt: Fmt, meta: string, backendId?: string) => void
-  removeUpload: (id: number) => void
-  approveUpload: (id: number) => void
+  addUpload: (name: string, fmt: Fmt, meta: string) => void
 
   /** Walkthrough state — see the note above `Draft`. */
   documents: DemoDoc[]
@@ -101,11 +88,8 @@ const HubContext = createContext<HubState | null>(null)
 let sessionSeq = 0
 
 export function HubProvider({ children }: { children: ReactNode }) {
-  const [loggedIn, setLoggedIn] = useState(false)
-  const [role] = useState<Role>('Admin')
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
-  const [uploads, setUploads] = useState<Upload[]>([])
   const [documents, setDocuments] = useState<DemoDoc[]>([])
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [sessions, setSessions] = useState<Record<string, Session>>({})
@@ -120,38 +104,9 @@ export function HubProvider({ children }: { children: ReactNode }) {
     toastTimer.current = setTimeout(() => setToast(null), 2600)
   }, [])
 
-  const addUpload = useCallback((name: string, fmt: Fmt, meta: string, backendId?: string) => {
-    setUploads((prev) => [
-      {
-        id: 2000 + prev.length,
-        name,
-        fmt,
-        meta,
-        note: 'Waiting on doc control approval',
-        status: 'Awaiting review',
-        kind: 'In process',
-        backendId,
-      },
-      ...prev,
-    ])
+  const addUpload = useCallback((name: string, fmt: Fmt, meta: string) => {
     setLastUpload({ name, fmt, meta })
     setUploadDialogOpen(true)
-  }, [])
-
-  const removeUpload = useCallback((id: number) => {
-    setUploads((prev) => prev.filter((u) => u.id !== id))
-  }, [])
-
-  /* Marks the submission approved in this session's queue. Publication itself
-     is not gated by this: the server stores a template as `active` the moment
-     it is uploaded and `GET /templates` returns it, so the file is already in
-     the library. Gating would need a review state on the API. */
-  const approveUpload = useCallback((id: number) => {
-    setUploads((prev) =>
-      prev.map((u) =>
-        u.id === id ? { ...u, status: 'Approved', kind: 'Approved', note: 'Published to the library' } : u,
-      ),
-    )
   }, [])
 
   /* ── Generation walkthrough ─────────────────────────────────────────── */
@@ -223,17 +178,10 @@ export function HubProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<HubState>(
     () => ({
-      loggedIn,
-      login: () => setLoggedIn(true),
-      logout: () => setLoggedIn(false),
-      role,
       sidebarOpen,
       toggleSidebar: () => setSidebarOpen((v) => !v),
-      uploads,
       lastUpload,
       addUpload,
-      removeUpload,
-      approveUpload,
       documents,
       drafts,
       sessions,
@@ -248,14 +196,9 @@ export function HubProvider({ children }: { children: ReactNode }) {
       closeUploadDialog: () => setUploadDialogOpen(false),
     }),
     [
-      loggedIn,
-      role,
       sidebarOpen,
-      uploads,
       lastUpload,
       addUpload,
-      removeUpload,
-      approveUpload,
       documents,
       drafts,
       sessions,

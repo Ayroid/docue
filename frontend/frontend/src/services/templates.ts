@@ -11,6 +11,12 @@
    so those requests get silently blocked. */
 const API_BASE_URL = '/api/v1'
 
+/* Every call carries the bearer token when there is one. Uploading *requires*
+   it; the read routes accept it optionally and use it to decide whether the
+   caller may also see their own not-yet-approved submissions. Signed out,
+   `authHeader()` is `{}` and the reads behave exactly as they did before. */
+import { authHeader } from '@/services/auth'
+
 export type TemplateFormat = 'xlsx' | 'docx' | 'pptx'
 
 export interface TemplateVersion {
@@ -44,6 +50,13 @@ export interface TemplateOut {
   tags: string[]
   /** True once the template is embedded and reachable by semantic search. */
   searchable: boolean
+  /* Review state of the current version. Anything the library lists is
+     'approved' by construction — the other values only appear on a template
+     the caller submitted themselves, or when the caller is an admin. */
+  approval_status: 'pending' | 'approved' | 'rejected'
+  /** The reviewer's note. Set on a rejection, optional on an approval. */
+  review_note: string | null
+  owner_id: string | null
   current_version_id: string
   created_at: string
   updated_at: string
@@ -113,7 +126,13 @@ export async function uploadTemplate(file: File): Promise<UploadAccepted | Templ
 
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}/templates`, { method: 'POST', body: form })
+    /* No Content-Type header: the browser has to set it itself so it can add
+       the multipart boundary. Only the Authorization header is ours. */
+    res = await fetch(`${API_BASE_URL}/templates`, {
+      method: 'POST',
+      headers: { ...authHeader() },
+      body: form,
+    })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
@@ -125,10 +144,17 @@ export async function uploadTemplate(file: File): Promise<UploadAccepted | Templ
   return res.json()
 }
 
-export async function listTemplates(): Promise<TemplateOut[]> {
+/**
+ * The library. Approved templates only, unless `mine` is set — which returns
+ * the caller's own submissions whatever their review state, so someone can
+ * watch an upload through the queue.
+ */
+export async function listTemplates(options: { mine?: boolean } = {}): Promise<TemplateOut[]> {
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}/templates`)
+    res = await fetch(`${API_BASE_URL}/templates${options.mine ? '?mine=true' : ''}`, {
+      headers: { ...authHeader() },
+    })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
@@ -143,7 +169,7 @@ export async function listTemplates(): Promise<TemplateOut[]> {
 export async function getTemplate(id: string): Promise<TemplateOut> {
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}/templates/${id}`)
+    res = await fetch(`${API_BASE_URL}/templates/${id}`, { headers: { ...authHeader() } })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
@@ -161,7 +187,7 @@ export async function getTemplate(id: string): Promise<TemplateOut> {
 export async function downloadTemplateFile(id: string): Promise<ArrayBuffer> {
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}/templates/${id}/download`)
+    res = await fetch(`${API_BASE_URL}/templates/${id}/download`, { headers: { ...authHeader() } })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
@@ -237,7 +263,9 @@ export interface JobStatus {
 export async function getIngestionStatus(templateId: string, jobId: string): Promise<JobStatus> {
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}/templates/${templateId}/ingestion/${jobId}`)
+    res = await fetch(`${API_BASE_URL}/templates/${templateId}/ingestion/${jobId}`, {
+      headers: { ...authHeader() },
+    })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
@@ -292,7 +320,7 @@ export async function searchTemplates(query: string, topK = 5): Promise<SearchRe
   try {
     res = await fetch(`${API_BASE_URL}/search`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
       body: JSON.stringify({ query, top_k: topK }),
     })
   } catch {

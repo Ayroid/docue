@@ -15,9 +15,15 @@ type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | {
  *
  * Deliberately outside `AppShell`: this route is meant to be a browser tab you
  * read a document in, so it gets the full window width rather than sharing it
- * with the app's sidebar. It is also ungated — `loggedIn` lives in memory only
- * (`store/HubProvider`), so a freshly-opened tab is always logged out and a
- * session check here would bounce every one of these links to the landing page.
+ * with the app's sidebar.
+ *
+ * It *is* session-gated, which it could not be before: the session used to live
+ * in memory, so a freshly-opened tab was always signed out and a check here
+ * would have bounced every one of these links to the landing page. The token is
+ * in `localStorage` now, so a new tab carries the session and the guard costs
+ * these links nothing. It also has to be gated — an unapproved template is
+ * refused to everyone but its submitter and the admins, and reaching that
+ * decision needs the request to be authenticated.
  */
 export function DocumentViewer() {
   const { id } = useParams()
