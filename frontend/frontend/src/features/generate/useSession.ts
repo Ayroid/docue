@@ -6,6 +6,7 @@ import {
   getSpec,
   sendAnswer as postAnswer,
   sendInstruction as postInstruction,
+  sendNotes as postNotes,
   startSession,
   type AnswerOut,
   type ProgressOut,
@@ -77,6 +78,9 @@ export interface SessionState {
   /** Resolves `true` when the turn was recorded. The caller needs to know, so
       it can put the user's text back in the composer instead of losing it. */
   send: (answer: string, opts?: { skip?: boolean }) => Promise<boolean>
+  /** Hand over a block of prior notes. Fills everything they supply and stops
+      the questions still ahead from asking for it. Never consumes a question. */
+  applyNotes: (input: { text?: string; file?: File }) => Promise<boolean>
   reload: () => void
 }
 
@@ -144,9 +148,9 @@ function messagesFrom(session: SessionOut | null, questions: QuestionOut[]): Cha
  */
 export function useSession(
   templateId: string | undefined,
-  options: { resumeSessionId?: string | null; intent?: string; tier?: Tier } = {},
+  options: { resumeSessionId?: string | null; intent?: string; tier?: Tier; notes?: string } = {},
 ): SessionState {
-  const { resumeSessionId = null, intent, tier } = options
+  const { resumeSessionId = null, intent, tier, notes } = options
 
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -159,6 +163,7 @@ export function useSession(
   const [planSummary, setPlanSummary] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [degraded, setDegraded] = useState(false)
+  const [prefillDegraded, setPrefillDegraded] = useState(false)
   const [nonce, setNonce] = useState(0)
   /* The answer just sent, held only until the refetched session contains it.
      Sending is a model call — extraction and derivation — so without this the
@@ -178,11 +183,16 @@ export function useSession(
       try {
         const live = resumeSessionId
           ? await getSession(resumeSessionId)
-          : await startSession({ templateId: templateId!, intent, tier })
+          : await startSession({ templateId: templateId!, intent, tier, notes })
         if (cancelled) return
 
         if ('plan_summary' in live) setPlanSummary((live as { plan_summary: string }).plan_summary)
         setSession(live)
+        // A pasted blob that could not be read is the one degraded state that
+        // happens before any turn, so `send` never gets the chance to report
+        // it. Held apart from the per-turn flag so the first answer's `false`
+        // cannot wipe it.
+        setPrefillDegraded(Boolean((live.known_context as { prefill_degraded?: boolean })?.prefill_degraded))
 
         // The template record and the region schema in parallel — neither
         // depends on the other and both are needed before the first paint.
@@ -271,6 +281,44 @@ export function useSession(
     [session],
   )
 
+  /**
+   * Notes pasted into the panel above the chat.
+   *
+   * Routed to `/instruct` rather than `/answer` even when a question is
+   * pending: a page of notes is not an answer to "what was the venue?", and
+   * sending it as one would consume that question and attribute everything it
+   * happened to fill to a question it was not a reply to. The server narrows
+   * the questions still ahead, so what the notes covered stops being asked.
+   */
+  const applyNotes = useCallback(
+    async (input: { text?: string; file?: File }) => {
+      const text = (input.text ?? '').trim()
+      if (!session || (!text && !input.file)) return false
+      setPendingEcho(input.file ? `Reading ${input.file.name}…` : text)
+      setSending(true)
+      setSendError(null)
+      try {
+        const turn: AnswerOut = await postNotes(session.session_id, { text, file: input.file })
+        setWarnings(turn.warnings)
+        setDegraded(turn.degraded)
+        const [live, spec] = await Promise.all([
+          getSession(session.session_id),
+          getSpec(session.session_id),
+        ])
+        setSession(live)
+        setSpecBody(spec)
+        return true
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : 'Those notes could not be read.')
+        return false
+      } finally {
+        setPendingEcho(null)
+        setSending(false)
+      }
+    },
+    [session],
+  )
+
   const questions = session?.questions ?? []
   const currentQuestion = session ? (session.questions[answeredCount(session)] ?? null) : null
 
@@ -302,10 +350,14 @@ export function useSession(
     progress: session?.progress ?? EMPTY_PROGRESS,
     messages,
     planSummary,
-    degraded,
+    // The per-turn flag OR the pre-fill one. `send` overwrites its own flag on
+    // every turn, so a blob that could not be read would otherwise stop being
+    // reported the moment the first question was answered.
+    degraded: degraded || prefillDegraded,
     warnings,
     done: Boolean(session) && currentQuestion === null,
     send,
+    applyNotes,
     reload,
   }
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useSession } from '@/features/generate/useSession'
 import { useLivePreview } from '@/features/preview/useLivePreview'
+import { NotesPanel } from '@/features/generate/NotesPanel'
 import { LivePreviewPanel } from '@/features/preview/LivePreviewPanel'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
@@ -166,6 +167,7 @@ function Conversation({
     warnings,
     sending,
     done,
+    applyNotes,
   } = state
 
   const preview = useLivePreview(original!, spec)
@@ -239,6 +241,11 @@ function Conversation({
             </div>
           </div>
 
+          <NotesPanel
+            disabled={sending}
+            onApply={(input) => void applyNotes(input)}
+          />
+
           <div ref={scrollRef} className="flex-1 p-5 flex flex-col gap-4 overflow-y-auto">
             {messages.map((m, i) => (
               <div key={i} className="flex flex-col gap-[7px]">
@@ -282,6 +289,22 @@ function Conversation({
                 ) : null}
               </div>
             ))}
+
+            {/* What this question no longer needs to ask, because the notes
+                already supplied it. The question itself is deliberately still
+                shown: it is the only place a mis-read becomes visible, and a
+                filled value cannot be cleared from the chat. */}
+            {currentQuestion?.prefilled_regions?.length && !done ? (
+              <div className="text-[11.5px] pl-1 opacity-70">
+                <span className="text-accent2-900">✓ Already have, from your notes: </span>
+                {currentQuestion.prefilled_regions
+                  .map((r) => original?.regions.find((x) => x.regionId === r)?.label ?? r)
+                  .join(', ')}
+                {currentQuestion.covers_regions.length === 0
+                  ? ' — nothing left to ask here, press Skip to move on.'
+                  : ''}
+              </div>
+            ) : null}
 
             {currentQuestion?.hint && !done ? (
               <div className="text-[11.5px] opacity-50 pl-1">

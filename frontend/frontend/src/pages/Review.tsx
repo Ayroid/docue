@@ -23,6 +23,7 @@ import { CheckIcon } from '@/components/icons'
 
 const PROV_LABEL: Record<ProvenanceKind, string> = {
   typed: 'Typed',
+  context: 'From your notes',
   derived: 'Derived',
   ai: 'AI-drafted',
   unchanged: 'Unchanged',
@@ -31,6 +32,10 @@ const PROV_LABEL: Record<ProvenanceKind, string> = {
 
 const PROV_TAG_CLASS: Record<ProvenanceKind, string> = {
   typed: '',
+  /* Solid, like `typed`. The dashed border means "nobody wrote this", and
+     somebody did write this — just in a document they pasted rather than in
+     answer to a question. */
+  context: 'border border-accent2-900/35',
   derived: 'border border-dashed border-accent bg-transparent',
   ai: 'border border-dashed border-accent bg-accent-100 text-accent-900',
   unchanged: 'opacity-45',

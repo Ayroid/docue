@@ -26,6 +26,10 @@ export interface QuestionOut {
   example: string | null
   /** The regions this question supplies — the live preview highlights these. */
   covers_regions: string[]
+  /** Regions this question was planned for that the pasted notes already
+   *  supplied. Removed from `covers_regions`; shown so the screen can say what
+   *  it already has. Empty `covers_regions` + entries here = fully answered. */
+  prefilled_regions?: string[]
 }
 
 export interface ProgressOut {
@@ -36,8 +40,9 @@ export interface ProgressOut {
 }
 
 export interface TurnOut {
-  /** `answer` replies to a planned question; `instruction` is a free-form edit. */
-  kind?: 'answer' | 'instruction'
+  /** `answer` replies to a planned question; `instruction` is a free-form edit;
+   *  `prefill` is notes pasted before the interview began. Only `answer` advances. */
+  kind?: 'answer' | 'instruction' | 'prefill'
   question_id: string
   question_text: string
   answer: string
@@ -246,6 +251,9 @@ export function startSession(input: {
   versionId?: string
   intent?: string
   tier?: Tier
+  /** Anything the user already has in writing. Read before the first question;
+   *  whatever it supplies is filled in, whatever it does not is still asked. */
+  notes?: string
 }): Promise<SessionCreateOut> {
   return post<SessionCreateOut>(
     '/sessions',
@@ -253,6 +261,7 @@ export function startSession(input: {
       template_id: input.templateId,
       version_id: input.versionId ?? null,
       intent: input.intent ?? null,
+      notes: input.notes ?? null,
       tier: input.tier ?? 'T2',
     },
     'Template not found.',
@@ -287,6 +296,31 @@ export function sendInstruction(sessionId: string, instruction: string): Promise
   return post<AnswerOut>(
     `/sessions/${sessionId}/instruct`,
     { instruction },
+    'Session not found.',
+  )
+}
+
+/** What the file picker offers. Mirrors `SUPPORTED_NOTE_TYPES` on the server. */
+export const NOTE_FILE_TYPES = '.txt,.md,.pdf,.docx,.xlsx,.pptx'
+
+/**
+ * Hand over prior material — pasted text, a file, or both.
+ *
+ * Multipart rather than JSON because of the file. `Content-Type` is
+ * deliberately left unset: the browser has to write it itself to include the
+ * multipart boundary, and setting it by hand produces a body the server cannot
+ * parse.
+ */
+export function sendNotes(
+  sessionId: string,
+  input: { text?: string; file?: File },
+): Promise<AnswerOut> {
+  const body = new FormData()
+  if (input.text?.trim()) body.append('text', input.text)
+  if (input.file) body.append('file', input.file)
+  return call<AnswerOut>(
+    `/sessions/${sessionId}/notes`,
+    { method: 'POST', body },
     'Session not found.',
   )
 }

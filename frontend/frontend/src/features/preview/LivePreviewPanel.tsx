@@ -4,6 +4,7 @@ import type { ParsedDocument } from './types'
 
 const LEGEND = [
   { label: 'Typed', className: 'whitespace-nowrap' },
+  { label: 'From your notes', className: 'whitespace-nowrap border border-accent2-900/35' },
   { label: 'Derived', className: 'whitespace-nowrap border border-dashed border-accent bg-transparent' },
   {
     label: 'AI-drafted',

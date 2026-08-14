@@ -50,6 +50,12 @@ export function toProvenance(provenance: string): ProvenanceKind {
   switch (root) {
     case 'user_answer':
       return 'typed'
+    // Still the user's own content, and it still outranks anything derived —
+    // but a value lifted out of a forwarded email is not a value they typed,
+    // and a screen whose whole job is showing where content came from should
+    // not render the two identically.
+    case 'user_context':
+      return 'context'
     case 'llm_derived':
       return 'derived'
     case 'llm_generated':

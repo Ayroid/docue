@@ -8,7 +8,10 @@
 
 export type OpKind = 'set_value' | 'replace_region_rows' | 'clone_table_rows' | 'clear_region' | 'protect'
 
-export type ProvenanceKind = 'typed' | 'derived' | 'ai' | 'unchanged' | 'system'
+/** `context` is a value read out of notes the user pasted — theirs, but not
+ *  typed by them in answer to anything. It sits on the solid side of the line
+ *  with `typed`; only `derived` and `ai` are dashed. */
+export type ProvenanceKind = 'typed' | 'context' | 'derived' | 'ai' | 'unchanged' | 'system'
 
 export interface ChangeOperation {
   op: OpKind
