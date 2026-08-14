@@ -226,7 +226,7 @@ def verify_email(payload: VerifyEmailIn, db: Session = Depends(get_db)) -> Token
     if user.status != STATUS_ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email verified, but this account is not active. Contact doc control.",
+            detail="Email verified, but this account is not active. Contact an admin.",
         )
     return _token_response(db, user)
 
@@ -308,7 +308,7 @@ def login(payload: LoginIn, db: Session = Depends(get_db)) -> TokenOut:
     if user.status != STATUS_ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account is not active. Contact doc control.",
+            detail="This account is not active. Contact an admin.",
         )
 
     return _token_response(db, user)

@@ -150,10 +150,14 @@ def notify_decision(
         if note:
             body += f" Note: {note}"
     else:
-        title = f"Changes requested: {template_title}"
+        # "Rejected", not "changes requested". The decision this records is
+        # `approval_status = 'rejected'` and the version is never published, so
+        # softening it in the notification told the submitter something milder
+        # than what actually happened to their upload.
+        title = f"Rejected: {template_title}"
         body = (
-            f"{reviewer_name} asked for changes to version {version_number} of "
-            f"“{template_title}”. Note: {note}"
+            f"{reviewer_name} rejected version {version_number} of "
+            f"“{template_title}”. Reason: {note}"
         )
 
     create_notification(
