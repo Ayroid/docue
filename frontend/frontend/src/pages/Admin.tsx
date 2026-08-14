@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useHub } from '@/store/HubProvider'
 import {
   approveVersion,
@@ -17,11 +16,15 @@ import { Textarea } from '@/components/ui/input'
 import { Icon } from '@/components/ui/icon'
 import { Segmented } from '@/components/ui/segmented'
 
+/* `all` leads and is the default: doc control opening this page wants to see
+   the whole queue, and a filter that hides two thirds of it by default reads as
+   an empty queue rather than a filtered one. It passes no `status_filter`, and
+   the API defaults to every status. */
 const TABS: { key: ApprovalStatus | 'all'; label: string }[] = [
+  { key: 'all', label: 'All' },
   { key: 'pending', label: 'Awaiting review' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
-  { key: 'all', label: 'All' },
 ]
 
 const STATUS_CLASS: Record<ApprovalStatus, string> = {
@@ -50,10 +53,9 @@ const STATUS_LABEL: Record<ApprovalStatus, string> = {
  * hub and by email.
  */
 export function Admin() {
-  const navigate = useNavigate()
   const { fireToast } = useHub()
 
-  const [tab, setTab] = useState<ApprovalStatus | 'all'>('pending')
+  const [tab, setTab] = useState<ApprovalStatus | 'all'>('all')
   const [queue, setQueue] = useState<Approval[]>([])
   const [pending, setPending] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -247,14 +249,18 @@ export function Admin() {
           ))}
         </div>
       ) : (
+        /* No upload action here. This page is about deciding on other people's
+           submissions, and the queue being empty is the good outcome rather
+           than a prompt to add something -- uploading lives in the library. */
         <EmptyState
           title={loading ? 'Loading the queue…' : tab === 'pending' ? 'Nothing awaiting review' : 'Nothing here'}
           body={
             tab === 'pending'
               ? 'When someone submits a template it lands here, and you are notified in the hub and by email.'
-              : 'No versions in this state yet.'
+              : tab === 'all'
+                ? 'No template versions have been submitted yet.'
+                : 'No versions in this state yet.'
           }
-          action={tab === 'pending' ? { label: 'Upload a template', onClick: () => navigate('/upload') } : undefined}
         />
       )}
 
