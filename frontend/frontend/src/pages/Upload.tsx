@@ -15,6 +15,8 @@ import { IngestionProgressPanel } from '@/features/ingestion/IngestionProgress'
 import { useIngestionJob } from '@/features/ingestion/useIngestionJob'
 import { UploadIcon } from '@/components/icons'
 import { Icon } from '@/components/ui/icon'
+import { useBlockStrayFileDrops, useFileDrop } from '@/features/upload/useFileDrop'
+import { cn } from '@/lib/utils'
 
 const CATEGORIES = CATS.filter((c) => c !== 'All')
 const ACCEPTED_EXTENSIONS = ['.docx', '.xlsx', '.pptx']
@@ -97,12 +99,38 @@ export function Upload() {
     )
   }, [isAdmin, tracking, ingestion.ready, ingestion.enrichmentPending, fireToast])
 
+  /* One acceptance path for both ways in — clicking the zone and dropping on
+     it. A dropped file has to clear exactly the same bar as a picked one, and
+     duplicating the check is how the two drift apart. */
+  const acceptFile = useCallback(
+    (picked: File | null) => {
+      setFile(picked)
+      setError(
+        picked && !formatFromFileName(picked.name)
+          ? 'Only .docx, .xlsx and .pptx files can be uploaded.'
+          : null,
+      )
+      /* Only seeds an empty field: re-picking must not overwrite a name that
+         has been typed by hand. */
+      if (picked) setName((current) => current || picked.name.replace(/\.[^.]+$/, ''))
+    },
+    [],
+  )
+
   const pickFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const picked = e.target.files?.[0] ?? null
-    setFile(picked)
-    setError(picked && !formatFromFileName(picked.name) ? 'Only .docx, .xlsx and .pptx files can be uploaded.' : null)
-    if (picked && !name) setName(picked.name.replace(/\.[^.]+$/, ''))
+    acceptFile(e.target.files?.[0] ?? null)
+    /* Clear the input's own value so choosing the *same* file again still
+       fires `change` — without this, re-picking after a failed upload is
+       silently ignored. */
+    e.target.value = ''
   }
+
+  /* Two zones, two flags: the dashed picker on the left and the empty preview
+     panel on the right, which is the largest thing on screen and the one a
+     file is most likely aimed at. */
+  const zoneDrop = useFileDrop(acceptFile)
+  const previewDrop = useFileDrop(acceptFile)
+  useBlockStrayFileDrops()
 
   const loadPickedFileBytes = useCallback(() => {
     if (!file) return Promise.reject(new Error('No file selected.'))
@@ -177,17 +205,32 @@ export function Upload() {
           />
           <button
             type="button"
-            className="border-2 border-dashed border-divider hover:border-accent hover:bg-accent-100/40 rounded-card py-8 px-4 flex flex-col items-center gap-3 cursor-pointer text-center bg-neutral-200/50 font-[inherit] transition-colors"
+            className={cn(
+              'border-2 border-dashed rounded-card py-8 px-4 flex flex-col items-center gap-3 cursor-pointer text-center font-[inherit] transition-colors',
+              zoneDrop.dragging
+                ? 'border-accent bg-accent-100 border-solid'
+                : 'border-divider bg-neutral-200/50 hover:border-accent hover:bg-accent-100/40',
+            )}
             onClick={() => fileInputRef.current?.click()}
+            {...zoneDrop.dropProps}
           >
-            <div className="w-12 h-12 rounded-lg bg-accent-100 text-accent grid place-items-center">
+            <div
+              className={cn(
+                'w-12 h-12 rounded-lg grid place-items-center transition-colors',
+                zoneDrop.dragging ? 'bg-accent text-white' : 'bg-accent-100 text-accent',
+              )}
+            >
               <UploadIcon width={18} height={18} />
             </div>
             <div className="text-body-md font-semibold break-words min-w-0 max-w-full">
-              {file?.name ?? 'Click to choose a file'}
+              {zoneDrop.dragging ? 'Drop it here' : (file?.name ?? 'Drop a file here, or click to choose')}
             </div>
             <div className="text-label-md text-neutral-600">
-              {file ? `${formatBytes(file.size)} · click to replace` : '.docx, .xlsx or .pptx — up to 25 MB'}
+              {zoneDrop.dragging
+                ? 'Release to load it'
+                : file
+                  ? `${formatBytes(file.size)} · drop or click to replace`
+                  : '.docx, .xlsx or .pptx — up to 25 MB'}
             </div>
           </button>
 
@@ -264,14 +307,34 @@ export function Upload() {
             loadBytes={loadPickedFileBytes}
           />
         ) : (
-          <Panel className="min-w-0 h-[calc(100vh-230px)] min-h-[420px] grid place-items-center">
-            <div className="text-center px-5">
-              <div className="w-[72px] h-[72px] rounded-pill bg-neutral-200 text-neutral-500 mx-auto mb-5 grid place-items-center"><Icon name="upload_file" size={30} /></div>
-              <h4 className="mb-2 text-title-lg">Nothing to preview yet</h4>
+          /* Also a drop target. It is by far the largest thing on screen and it
+             is where the eye already is, so a dragged file gets aimed at it
+             whatever the small dashed zone on the left says. */
+          <Panel
+            className={cn(
+              'min-w-0 h-[calc(100vh-230px)] min-h-[420px] grid place-items-center transition-colors',
+              previewDrop.dragging && 'border-accent border-2 border-dashed bg-accent-100/50',
+            )}
+            {...previewDrop.dropProps}
+          >
+            <div className="text-center px-5 pointer-events-none">
+              <div
+                className={cn(
+                  'w-[72px] h-[72px] rounded-pill mx-auto mb-5 grid place-items-center transition-colors',
+                  previewDrop.dragging ? 'bg-accent text-white' : 'bg-neutral-200 text-neutral-500',
+                )}
+              >
+                <Icon name="upload_file" size={30} />
+              </div>
+              <h4 className="mb-2 text-title-lg">
+                {previewDrop.dragging ? 'Drop it here' : 'Nothing to preview yet'}
+              </h4>
               <p className="text-neutral-700 text-body-md max-w-[42ch] mx-auto m-0">
-                {file
-                  ? 'That file type can’t be previewed — choose a .docx, .xlsx or .pptx.'
-                  : 'Choose a file and it will render here exactly as reviewers will see it.'}
+                {previewDrop.dragging
+                  ? 'Release to load it.'
+                  : file
+                    ? 'That file type can’t be previewed — choose a .docx, .xlsx or .pptx.'
+                    : 'Drop a file here, or choose one on the left, and it will render exactly as reviewers will see it.'}
               </p>
             </div>
           </Panel>

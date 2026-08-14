@@ -66,6 +66,38 @@ export interface VersionHistory {
 }
 
 /**
+ * The raw bytes of *one* version, for rendering it in the browser.
+ *
+ * `/templates/{id}/download` always serves whichever version is current, so
+ * reading an older one needs the version addressed directly. The route is
+ * session-gated and checks approval per caller: an unapproved version's bytes
+ * go only to its submitter, the template's owner and admins, and answers 404
+ * to everyone else.
+ *
+ * Not driven off `VersionRow.download_url`, even though that names this same
+ * path — that field is a plain string meant for a link, and the bearer token
+ * has to be attached by hand here.
+ */
+export async function downloadVersionFile(templateId: string, versionId: string): Promise<ArrayBuffer> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/templates/${templateId}/versions/${versionId}/download`, {
+      headers: { ...authHeader() },
+    })
+  } catch {
+    throw new VersionApiError(0, 'Could not reach the Template Hub server.')
+  }
+  if (!res.ok) {
+    const message =
+      res.status === 404
+        ? 'That version is no longer available.'
+        : `Could not open that version (${res.status}).`
+    throw new VersionApiError(res.status, message)
+  }
+  return res.arrayBuffer()
+}
+
+/**
  * Every version of a template, newest first.
  *
  * The server filters per caller: an admin sees the whole lineage, an author

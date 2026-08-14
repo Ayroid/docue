@@ -4,7 +4,8 @@ import {
   type VersionHistory as History,
   type VersionRow,
 } from '@/services/versions'
-import { formatBytes } from '@/lib/utils'
+import { cn, formatBytes } from '@/lib/utils'
+import { Icon } from '@/components/ui/icon'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 
@@ -19,7 +20,19 @@ import { Panel, SectionLabel } from '@/components/ui/table'
  * "changed from", deliberately, so the UI never implies a before/after it
  * cannot show.
  */
-export function VersionHistory({ templateId }: { templateId: string }) {
+export function VersionHistory({
+  templateId,
+  selectedVersionId,
+  onSelectVersion,
+}: {
+  templateId: string
+  /** Which version the page is previewing, so the row can say so. */
+  selectedVersionId?: string | null
+  /** Picking a row previews that version instead of the current one. The
+      number comes along so the caller can label the preview without having to
+      fetch the history a second time to look it up. */
+  onSelectVersion?: (versionId: string, versionNumber: number) => void
+}) {
   const [history, setHistory] = useState<History | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -53,11 +66,24 @@ export function VersionHistory({ templateId }: { templateId: string }) {
   return (
     <Panel>
       <SectionLabel>Version history</SectionLabel>
-      <div className="flex flex-col gap-[2px] mt-[10px]">
+
+      {onSelectVersion ? (
+        <p className="text-[11.5px] opacity-55 m-0 mb-[8px]">Pick a version to preview it.</p>
+      ) : null}
+
+      {/* Capped and scrolled on its own. A template with twenty versions would
+          otherwise run the rail far past the preview beside it, leaving the
+          page scrolling through history to get back to the document. The
+          negative margin lets a focus ring sit outside the row without the
+          overflow clipping it. */}
+      <div className="flex flex-col gap-[2px] mt-[4px] max-h-[52vh] overflow-y-auto -mx-[6px] px-[6px]">
         {history.versions.map((v) => (
           <VersionRowView
             key={v.id}
             version={v}
+            selected={selectedVersionId === v.id}
+            selectable={Boolean(onSelectVersion)}
+            onSelect={() => onSelectVersion?.(v.id, v.version_number)}
             expanded={open === v.id}
             onToggle={() => setOpen(open === v.id ? null : v.id)}
           />
@@ -83,10 +109,16 @@ function statusTag(v: VersionRow) {
 
 function VersionRowView({
   version,
+  selected,
+  selectable,
+  onSelect,
   expanded,
   onToggle,
 }: {
   version: VersionRow
+  selected: boolean
+  selectable: boolean
+  onSelect: () => void
   expanded: boolean
   onToggle: () => void
 }) {
@@ -94,22 +126,55 @@ function VersionRowView({
   const created = new Date(version.created_at).toLocaleString()
 
   return (
-    <div className="border-b border-white/5 last:border-0 py-[10px]">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 flex-wrap text-left"
-      >
-        <span className="font-semibold text-[13px] whitespace-nowrap">v{version.version_number}</span>
-        <Tag variant={tag.variant} className="whitespace-nowrap flex-none">
-          {tag.label}
-        </Tag>
-        <span className="text-[12px] opacity-60 flex-[1_1_180px] min-w-[140px]">
-          {version.summary}
-          {version.submitted_by_name ? ` · ${version.submitted_by_name}` : ''}
-        </span>
-        <span className="text-[11.5px] opacity-45 whitespace-nowrap">{created}</span>
-      </button>
+    <div
+      className={cn(
+        'rounded-[10px] border px-[10px] py-[9px] transition-colors',
+        selected ? 'border-accent-400 bg-accent-100' : 'border-transparent',
+      )}
+    >
+      {/* Two controls, not one. Choosing which version to read and unfolding
+          what it changed are different questions, and hanging both off a single
+          click meant you could not ask one without answering the other. */}
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={selectable ? onSelect : onToggle}
+          aria-current={selected ? 'true' : undefined}
+          title={selectable ? `Preview v${version.version_number}` : undefined}
+          className={cn(
+            'flex-1 min-w-0 text-left bg-transparent border-0 p-0 font-[inherit] text-ink rounded-[6px]',
+            selectable && 'cursor-pointer',
+          )}
+        >
+          <span className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-[13px] whitespace-nowrap">v{version.version_number}</span>
+            <Tag variant={tag.variant} className="whitespace-nowrap flex-none">
+              {tag.label}
+            </Tag>
+            {selected ? (
+              <span className="text-[11px] font-semibold uppercase tracking-[.06em] text-accent-700 whitespace-nowrap">
+                Previewing
+              </span>
+            ) : null}
+          </span>
+          <span className="block text-[12px] opacity-60 mt-[3px]">
+            {version.summary}
+            {version.submitted_by_name ? ` · ${version.submitted_by_name}` : ''}
+          </span>
+          <span className="block text-[11.5px] opacity-45 mt-[2px]">{created}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} what v${version.version_number} changed`}
+          title={expanded ? 'Hide details' : 'Show details'}
+          className="flex-none w-7 h-7 grid place-items-center rounded-[6px] border-0 bg-transparent cursor-pointer text-neutral-600 hover:bg-neutral-200"
+        >
+          <Icon name={expanded ? 'expand_less' : 'expand_more'} size={18} />
+        </button>
+      </div>
 
       {/* Drift, detectable without opening either file: the document's own
           `Ver.` disagrees with the number the hub gave it. */}
