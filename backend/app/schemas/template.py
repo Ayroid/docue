@@ -58,6 +58,12 @@ class TemplateOut(BaseModel):
     # submitter looking at their own upload, or by an admin.
     approval_status: str = "pending"
     review_note: str | None = None
+    # Who the template is published to, as distinct from `approval_status`,
+    # which is whether it is published at all. 'public' or 'restricted'.
+    # Defaulted rather than required so a caller reading an older response shape
+    # -- or a row written before the column existed -- lands on the permissive
+    # value the product had before restriction was possible.
+    visibility: str = "public"
     owner_id: uuid.UUID | None = None
     current_version_id: uuid.UUID | None
     created_at: datetime

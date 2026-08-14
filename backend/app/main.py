@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.access import router as access_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.documents import router as documents_router
@@ -80,6 +81,9 @@ app.include_router(generate_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+# Before nothing in particular, but kept next to `admin_router`: it owns
+# /admin/templates/{id}/access and shares that router's admin-only contract.
+app.include_router(access_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 # After `templates_router`: both own paths under /templates/{id}, and the
 # history route here must not shadow its `GET /templates/{template_id}`.

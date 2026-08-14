@@ -13,12 +13,21 @@ from app.db.base import Base
 # re-embedding every row, so it lives next to the column it defines.
 EMBEDDING_DIMENSIONS = 1024
 
+# Who a template is published to. Orthogonal to approval, which is a property of
+# a version and answers a different question -- see `app/access/templates.py`.
+VISIBILITY_PUBLIC = "public"
+VISIBILITY_RESTRICTED = "restricted"
+VISIBILITIES = (VISIBILITY_PUBLIC, VISIBILITY_RESTRICTED)
+
 
 class Template(Base):
     __tablename__ = "templates"
     __table_args__ = (
         CheckConstraint("format IN ('xlsx', 'docx', 'pptx')", name="ck_templates_format"),
         CheckConstraint("status IN ('active', 'deleted')", name="ck_templates_status"),
+        CheckConstraint(
+            "visibility IN ('public', 'restricted')", name="ck_templates_visibility"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -54,6 +63,19 @@ class Template(Base):
     # falls back to the admins when it is null.
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Who may see it, as distinct from whether it is approved. `public` is the
+    # rule that was in force before this column existed -- any signed-in caller,
+    # subject to approval -- so it is the default and every pre-existing row
+    # carries it. `restricted` narrows the template to its owner, admins, and
+    # whoever holds a live row in `template_grants`.
+    #
+    # Deliberately not derived from `template_grants` being non-empty: "shared
+    # with nobody yet" and "open to everyone" are opposite intentions, and an
+    # admin who restricts a template before naming anyone must not have it
+    # silently stay public until they do.
+    visibility: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=VISIBILITY_PUBLIC, server_default=VISIBILITY_PUBLIC,
     )
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("template_versions.id", use_alter=True, name="fk_templates_current_version"), nullable=True

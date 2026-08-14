@@ -9,6 +9,7 @@ from app.models.notification import Notification
 from app.models.qa_run import QaRun
 from app.models.question_plan import QuestionPlan
 from app.models.template import Template
+from app.models.template_grant import TemplateGrant
 from app.models.template_version import TemplateVersion
 from app.models.user import User
 
@@ -24,6 +25,7 @@ __all__ = [
     "QaRun",
     "QuestionPlan",
     "Template",
+    "TemplateGrant",
     "TemplateVersion",
     "User",
 ]

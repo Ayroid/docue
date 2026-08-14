@@ -29,7 +29,9 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.access.templates import narrows_visibility, search_predicate
 from app.ai.bedrock import BedrockError, embed
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -52,20 +54,19 @@ _TSVECTOR = """
     setweight(to_tsvector('english', coalesce(category, '')), 'C')
 """
 
-# Unapproved templates are invisible to search, exactly as they are to
-# `GET /templates`. Written as a correlated EXISTS rather than a join so it can
-# be dropped into both halves unchanged, and so neither query grows a row per
-# version. An approval gate that only covered the library listing would be no
-# gate at all: the search box is how anyone actually finds a template.
-_APPROVED = """
-  AND EXISTS (
-        SELECT 1 FROM template_versions v
-        WHERE v.id = templates.current_version_id
-          AND v.approval_status = 'approved'
-  )
-"""
+# Who may see what is not this module's decision to make. The clause is built by
+# `app.access.templates.search_predicate` and dropped into *both* halves
+# unchanged -- written as a correlated EXISTS so neither query grows a row per
+# version, and applied to both because a gate on one half would leak through the
+# other. A gate that only covered the library listing would be no gate at all:
+# the search box is how anyone actually finds a template.
+#
+# Built per call rather than interpolated once at import, because the clause now
+# depends on the caller.
 
-_LEXICAL_SQL = f"""
+
+def _lexical_sql(access: str) -> str:
+    return f"""
 SELECT id::text AS id,
        ts_rank_cd({_TSVECTOR}, plainto_tsquery('english', :q)) AS score,
        ts_headline('english',
@@ -76,18 +77,20 @@ SELECT id::text AS id,
 FROM templates
 WHERE status = 'active'
   AND ({_TSVECTOR}) @@ plainto_tsquery('english', :q)
-  {_APPROVED}
+  {access}
 ORDER BY score DESC
 LIMIT :n
 """
 
+
 # `<=>` is cosine distance, so 1 - distance is similarity. Ordering by the
 # operator (not by the expression) is what lets the HNSW index serve the query.
-_VECTOR_SQL = f"""
+def _vector_sql(access: str) -> str:
+    return f"""
 SELECT id::text AS id, 1 - (embedding <=> CAST(:qv AS vector)) AS score
 FROM templates
 WHERE status = 'active' AND embedding IS NOT NULL
-  {_APPROVED}
+  {access}
 ORDER BY embedding <=> CAST(:qv AS vector)
 LIMIT :n
 """
@@ -152,7 +155,14 @@ def _rrf(rankings: list[list[str]], k: int = RRF_K) -> dict[str, float]:
     return scores
 
 
-def search(db: Session, query: str, *, top_k: int = 5, candidates: int = 25) -> SearchOutcome:
+def search(
+    db: Session,
+    query: str,
+    *,
+    top_k: int = 5,
+    candidates: int = 25,
+    viewer: "User | None" = None,
+) -> SearchOutcome:
     """Run both signals, fuse, and hydrate the winners.
 
     Degrades rather than failing: if embedding the query errors -- Bedrock down,
@@ -160,6 +170,11 @@ def search(db: Session, query: str, *, top_k: int = 5, candidates: int = 25) -> 
     says so. Plan §14's rule is that an outage costs capability, not the
     product; on this corpus BM25 alone still finds every template by its
     acronym.
+
+    `viewer` is the caller the results must be legal for. It defaults to None --
+    an anonymous search of the approved library, which is what this returned
+    before it took a caller at all -- so in-process callers that only care about
+    ranking need not invent one.
     """
     import time
 
@@ -168,14 +183,37 @@ def search(db: Session, query: str, *, top_k: int = 5, candidates: int = 25) -> 
     if not query:
         return SearchOutcome(hits=[], latency_ms=0, lexical_candidates=0, vector_candidates=0)
 
-    lexical = db.execute(text(_LEXICAL_SQL), {"q": query, "n": candidates}).mappings().all()
+    access, access_params = search_predicate(viewer)
+    # **Postgres applies the access clause *after* the HNSW index scan.** The
+    # vector half asks the index for `n` nearest rows and only then discards the
+    # ones this caller may not see, so a corpus with many restricted templates
+    # returns fewer than `n` -- semantic recall quietly degrading for exactly the
+    # users grants affect most, with nothing in the response to say so. Asking
+    # for a wider pool up front is the cheap fix at this corpus size; the
+    # principled one is pgvector 0.8's `hnsw.iterative_scan`, which is worth
+    # switching to if this table ever gets large.
+    #
+    # The lexical half is filtered the same way but is not index-limited in the
+    # same sense, so it takes the same widening for free rather than a second
+    # code path.
+    pool = candidates * 4 if narrows_visibility(viewer) else candidates
+
+    lexical = (
+        db.execute(text(_lexical_sql(access)), {"q": query, "n": pool, **access_params})
+        .mappings()
+        .all()
+    )
 
     degraded = None
     vector_rows: list[Any] = []
     try:
         vector = embed([query], purpose="search_query", input_type="search_query")[0]
         literal = "[" + ",".join(f"{value:.6f}" for value in vector) + "]"
-        vector_rows = db.execute(text(_VECTOR_SQL), {"qv": literal, "n": candidates}).mappings().all()
+        vector_rows = (
+            db.execute(text(_vector_sql(access)), {"qv": literal, "n": pool, **access_params})
+            .mappings()
+            .all()
+        )
     except BedrockError as exc:
         logger.warning("vector half unavailable, serving lexical only: %s", exc)
         degraded = "semantic search unavailable; keyword results only"
