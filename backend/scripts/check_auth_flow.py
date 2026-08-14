@@ -396,7 +396,7 @@ def main() -> int:
               f"got {status} {detail.get('approval_status') if isinstance(detail, dict) else ''}")
 
         # ── 4. the admin is told ──────────────────────────────────────────
-        print("\n4. Doc control is notified")
+        print("\n4. The admins are notified")
         time.sleep(UPLOAD_SETTLE_S)  # the announcement is a background task
 
         status, queue = _get(f"{api}/admin/approvals?status_filter=pending", admin_token)

@@ -233,7 +233,7 @@ def compile_change_spec_endpoint(
     db.add(qa_run)
     db.commit()
 
-    # A stored version is a submission, so doc control hears about it the same
+    # A stored version is a submission, so admins hear about it the same
     # way it hears about an upload. After the response, because notifying is an
     # SMTP round trip per admin and the caller is waiting on a compile result.
     if result_version is not None:
