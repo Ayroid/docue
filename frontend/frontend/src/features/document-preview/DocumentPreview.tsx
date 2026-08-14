@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TemplateFormat } from '@/services/templates'
+import { DocumentPreviewSkeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
 type Status = 'loading' | 'ready' | 'error'
@@ -75,8 +76,13 @@ export function DocumentPreview({
 
   return (
     <div className={className}>
+      {/* Shaped like the file that is coming — a page for docx/pptx, a grid for
+          xlsx — so the placeholder occupies the space the render will land in
+          rather than collapsing the panel to one line of text and then
+          expanding it. `fileName` moves into the skeleton's accessible label,
+          which is where a caption that nobody reads belongs. */}
       {status === 'loading' ? (
-        <p className="text-[13px] opacity-60 py-8 px-4 m-0 text-center">Rendering {fileName}…</p>
+        <DocumentPreviewSkeleton variant={format === 'xlsx' ? 'sheet' : 'page'} fileName={fileName} />
       ) : null}
       {status === 'error' ? (
         <p className="text-[13px] text-accent2-700 py-8 px-4 m-0 text-center">

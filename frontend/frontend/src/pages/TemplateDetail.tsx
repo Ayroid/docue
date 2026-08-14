@@ -10,6 +10,7 @@ import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/common'
 import { Icon } from '@/components/ui/icon'
+import { DocumentPreviewSkeleton, Skeleton, SkeletonGroup } from '@/components/ui/skeleton'
 import { DownloadIcon } from '@/components/icons'
 
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
@@ -86,7 +87,49 @@ export function TemplateDetail() {
             action={{ label: 'Back to Discovery', onClick: () => navigate('/discovery') }}
           />
         ) : (
-          <p className="text-[13px] opacity-60 py-16 text-center m-0">Loading document…</p>
+          /* The real page's own shape — breadcrumb, title block, then the
+             preview beside its details rail. Landing on this and then having it
+             replaced in place is the point; the single centred line it replaced
+             threw the whole layout in at once. */
+          <SkeletonGroup label="Loading document" className="flex flex-col gap-6">
+            <div className="flex items-center gap-2">
+              <Skeleton height={12} width={72} rounded="sm" />
+              <Skeleton height={12} width={40} rounded="sm" />
+              <Skeleton height={12} width={140} rounded="sm" />
+            </div>
+
+            <div className="flex items-start gap-4">
+              <Skeleton width={40} height={40} rounded="md" className="flex-none" />
+              <div className="min-w-0 flex-1 flex flex-col gap-2">
+                <Skeleton height={24} width="44%" />
+                <Skeleton height={13} width="30%" rounded="sm" />
+              </div>
+              <Skeleton width={124} height={38} rounded="pill" className="flex-none" />
+            </div>
+
+            <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
+              <div className="bg-surface border border-divider rounded-card p-5 min-w-0">
+                <div className="flex items-center gap-2 mb-[14px]">
+                  <Skeleton width={86} height={22} rounded="pill" />
+                  <Skeleton height={11} width={150} rounded="sm" />
+                  <Skeleton width={128} height={30} rounded="pill" className="ml-auto" />
+                </div>
+                <DocumentPreviewSkeleton />
+              </div>
+
+              <div className="bg-surface border border-divider rounded-card p-5">
+                <Skeleton height={11} width={78} rounded="sm" className="mb-4" />
+                <div className="flex flex-col gap-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex justify-between gap-3 border-t border-divider pt-3 first:border-0 first:pt-0">
+                      <Skeleton height={12} width={64} rounded="sm" />
+                      <Skeleton height={12} width={88} rounded="sm" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </SkeletonGroup>
         )}
       </PageBody>
     )

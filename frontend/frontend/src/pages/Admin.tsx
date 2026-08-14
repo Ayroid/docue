@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/input'
 import { Icon } from '@/components/ui/icon'
+import { ApprovalCardSkeleton, SkeletonGroup } from '@/components/ui/skeleton'
 import { Segmented } from '@/components/ui/segmented'
 
 /* `all` leads and is the default: doc control opening this page wants to see
@@ -148,7 +149,20 @@ export function Admin() {
         </p>
       ) : null}
 
-      {queue.length ? (
+      {loading && !queue.length ? (
+        /* Only when there is nothing to show yet. A refresh with rows already
+           on screen keeps them and lets the Refresh button carry the busy
+           state -- replacing a queue you are reading with placeholders is a
+           worse answer than briefly showing slightly stale rows. */
+        <SkeletonGroup
+          label="Loading the approval queue"
+          className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(340px,1fr))]"
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
+            <ApprovalCardSkeleton key={i} />
+          ))}
+        </SkeletonGroup>
+      ) : queue.length ? (
         <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
           {queue.map((row) => (
             <article
@@ -251,9 +265,12 @@ export function Admin() {
       ) : (
         /* No upload action here. This page is about deciding on other people's
            submissions, and the queue being empty is the good outcome rather
-           than a prompt to add something -- uploading lives in the library. */
+           than a prompt to add something -- uploading lives in the library.
+
+           No `loading` case either: an empty queue mid-load renders the
+           skeleton branch above, so reaching here means the load finished. */
         <EmptyState
-          title={loading ? 'Loading the queue…' : tab === 'pending' ? 'Nothing awaiting review' : 'Nothing here'}
+          title={tab === 'pending' ? 'Nothing awaiting review' : 'Nothing here'}
           body={
             tab === 'pending'
               ? 'When someone submits a template it lands here, and you are notified in the hub and by email.'

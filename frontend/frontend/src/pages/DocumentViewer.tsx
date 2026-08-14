@@ -6,6 +6,7 @@ import { saveTemplateToDisk } from '@/features/document-library/saveToDisk'
 import { DocumentStage } from '@/features/document-preview/DocumentStage'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
+import { DocumentPreviewSkeleton } from '@/components/ui/skeleton'
 import { DownloadIcon } from '@/components/icons'
 
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
@@ -100,7 +101,12 @@ export function DocumentViewer() {
         {load.state === 'failed' ? (
           <p className="text-[14px] text-accent2-700 text-center py-20 px-5 m-0">{load.message}</p>
         ) : (
-          <p className="text-[13px] opacity-60 text-center py-20 px-5 m-0">Opening document…</p>
+          /* The format is unknown until the metadata lands, so this is always
+             the page variant -- a grid here would be a guess, and guessing
+             wrong means the placeholder and the render disagree. */
+          <div className="max-w-[900px] mx-auto py-8 px-[clamp(14px,3vw,28px)]">
+            <DocumentPreviewSkeleton />
+          </div>
         )}
       </div>
     )
