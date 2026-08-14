@@ -30,6 +30,10 @@ export function Generate() {
   const [chatInput, setChatInput] = useState('')
 
   const resumeSessionId = params.get('session')
+  /* Set when this conversation was started from "Update Document" rather than
+     from Generate. It changes what the review screen offers at the end — a
+     submission for approval, not a document — so it has to survive the hop. */
+  const updatingTemplate = params.get('mode') === 'version'
   const state = useSession(id, { resumeSessionId })
   const { loading, error, sending, session, original, done, send, reload } = state
 
@@ -64,7 +68,7 @@ export function Generate() {
     )
   }
 
-  return <Conversation {...{ state, chatInput, setChatInput, submit, navigate }} />
+  return <Conversation {...{ state, chatInput, setChatInput, submit, navigate, updatingTemplate }} />
 }
 
 /* Split out so the hooks below never run before the session has loaded — an
@@ -76,12 +80,15 @@ function Conversation({
   setChatInput,
   submit,
   navigate,
+  updatingTemplate,
 }: {
   state: ReturnType<typeof useSession>
   chatInput: string
   setChatInput: (v: string) => void
   submit: (skip?: boolean) => Promise<void>
   navigate: ReturnType<typeof useNavigate>
+  /** Started from "Update document": the review screen submits for approval. */
+  updatingTemplate: boolean
 }) {
   const {
     session,
@@ -285,9 +292,13 @@ function Conversation({
             variant="primary"
             className="whitespace-nowrap"
             disabled={progress.fields_filled === 0}
-            onClick={() => navigate(`/generate/${session!.session_id}/review`)}
+            onClick={() =>
+              navigate(
+                `/generate/${session!.session_id}/review${updatingTemplate ? '?mode=version' : ''}`,
+              )
+            }
           >
-            Review &amp; commit
+            {updatingTemplate ? 'Review & submit' : 'Review & commit'}
           </Button>
         </div>
       </div>

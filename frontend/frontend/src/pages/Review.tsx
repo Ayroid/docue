@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useHub } from '@/store/HubProvider'
 import { preservationClaims, toChangeSpec, toParsedDocument } from '@/features/generate/adapters'
 import { applySpec } from '@/features/preview/workingCopy'
@@ -53,6 +53,9 @@ const FMT_LABEL: Record<string, string> = { xlsx: 'XLS', docx: 'DOC', pptx: 'PPT
 export function Review() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  /* Carried from "Update Document" through Generate. See the buttons below. */
+  const updatingTemplate = searchParams.get('mode') === 'version'
   const { commitSession: recordDocument, fireToast } = useHub()
 
   const [session, setSession] = useState<SessionOut | null>(null)
@@ -194,8 +197,12 @@ export function Review() {
   return (
     <PageBody>
       <PageHeading
-        title="Review & commit"
-        subtitle="Check what changed and where it came from before the document is created."
+        title={updatingTemplate ? 'Review & submit' : 'Review & commit'}
+        subtitle={
+          updatingTemplate
+            ? 'Check what changed and where it came from before submitting this as the next version.'
+            : 'Check what changed and where it came from before the document is created.'
+        }
       />
 
       {error ? (
@@ -341,38 +348,71 @@ export function Review() {
             )}
           </Panel>
 
+          {/* Which action leads depends on why this conversation was started.
+              Arriving from "Update Document" means the intent was declared
+              before any work happened, so submitting is the primary action and
+              keeping a private copy is the aside. Arriving from Generate means
+              the opposite. Same two calls either way -- only the emphasis
+              moves, because guessing this wrong is how a filled-in form ends up
+              published as the blank one. */}
           <div className="flex flex-col gap-[10px]">
-            <Button
-              variant="primary"
-              block
-              className="mt-0 whitespace-nowrap"
-              disabled={committing || !qa || qa.overall !== 'pass'}
-              onClick={() => void handleCommit(false)}
-            >
-              {committing ? 'Compiling…' : 'Create document'}
-            </Button>
-
-            {/* The version-control path. Separate from "Create document"
-                because most runs produce a one-off document that has no
-                business replacing the template everyone else starts from. */}
-            <div className="bg-surface rounded-card p-[14px] flex flex-col gap-[10px]">
-              <div>
-                <div className="text-[13px] font-semibold">Make this the template</div>
-                <p className="text-[11.5px] opacity-60 mt-[2px]">
-                  Sends it to doc control as the next version. They decide whether it replaces the
-                  current one — until then the library keeps serving the old version.
+            {updatingTemplate ? (
+              <>
+                <Button
+                  variant="primary"
+                  block
+                  className="mt-0 whitespace-nowrap"
+                  disabled={committing || !qa || qa.overall !== 'pass'}
+                  onClick={() => void handleCommit(true)}
+                >
+                  {committing ? 'Submitting…' : 'Submit for approval'}
+                </Button>
+                <p className="text-[11.5px] opacity-60">
+                  This becomes v{(template.current_version?.version_number ?? 1) + 1} once doc
+                  control approves it. Until then the library keeps serving the current version.
                 </p>
-              </div>
-              <Button
-                variant="secondary"
-                block
-                className="mt-0 whitespace-nowrap"
-                disabled={committing || !qa || qa.overall !== 'pass'}
-                onClick={() => void handleCommit(true)}
-              >
-                Create &amp; submit as new version
-              </Button>
-            </div>
+                <Button
+                  variant="ghost"
+                  block
+                  className="mt-0 whitespace-nowrap"
+                  disabled={committing || !qa || qa.overall !== 'pass'}
+                  onClick={() => void handleCommit(false)}
+                >
+                  Just keep it as my document
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="primary"
+                  block
+                  className="mt-0 whitespace-nowrap"
+                  disabled={committing || !qa || qa.overall !== 'pass'}
+                  onClick={() => void handleCommit(false)}
+                >
+                  {committing ? 'Compiling…' : 'Create document'}
+                </Button>
+
+                <div className="bg-surface rounded-card p-[14px] flex flex-col gap-[10px]">
+                  <div>
+                    <div className="text-[13px] font-semibold">Make this the template</div>
+                    <p className="text-[11.5px] opacity-60 mt-[2px]">
+                      Sends it to doc control as the next version. They decide whether it replaces
+                      the current one — until then the library keeps serving the old version.
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    block
+                    className="mt-0 whitespace-nowrap"
+                    disabled={committing || !qa || qa.overall !== 'pass'}
+                    onClick={() => void handleCommit(true)}
+                  >
+                    Create &amp; submit as new version
+                  </Button>
+                </div>
+              </>
+            )}
 
             {qa && qa.overall !== 'pass' ? (
               <p className="text-[11.5px] opacity-60">

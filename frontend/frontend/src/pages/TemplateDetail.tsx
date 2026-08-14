@@ -223,7 +223,7 @@ export function TemplateDetail() {
               onClick={() => navigate(`/templates/${doc.id}/update`)}
             >
               <Icon name="edit_document" size={18} />
-              Update template
+              Update document
             </Button>
           </div>
 

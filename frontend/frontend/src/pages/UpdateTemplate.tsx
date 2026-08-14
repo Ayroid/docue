@@ -60,14 +60,14 @@ export function UpdateTemplate() {
         className="py-1 px-2 mb-[6px] whitespace-nowrap"
         onClick={() => navigate(`/templates/${id}`)}
       >
-        Back to the template
+        Back to the document
       </Button>
 
       <PageHeading
-        title="Update this template"
+        title="Update document"
         subtitle={
           template
-            ? `${template.title}${current ? ` — currently v${current}` : ''}. Whichever route you pick, the result goes to doc control for approval before it replaces the current version.`
+            ? `${template.title}${current ? ` — currently v${current}` : ''}. Whichever route you pick, the result is submitted as v${(current ?? 1) + 1} and goes to doc control for approval before it replaces the current version.`
             : 'Loading…'
         }
       />
@@ -87,7 +87,7 @@ export function UpdateTemplate() {
           body="Work through the template with the assistant and let it apply your changes. Every edit is shown with where it came from before anything is saved."
           note="Best for changing wording and content, not layout."
           action="Start a conversation"
-          onClick={() => navigate(`/templates/${id}/generate?mode=template`)}
+          onClick={() => navigate(`/templates/${id}/generate?mode=version`)}
         />
       </div>
     </PageBody>
