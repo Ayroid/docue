@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useHub } from '@/store/HubProvider'
 import {
   getVersionHistory,
   type VersionHistory as History,
   type VersionRow,
-} from '@/services/promotions'
+} from '@/services/versions'
 import { formatBytes } from '@/lib/utils'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
@@ -21,7 +20,6 @@ import { Panel, SectionLabel } from '@/components/ui/table'
  * cannot show.
  */
 export function VersionHistory({ templateId }: { templateId: string }) {
-  const { userId } = useHub()
   const [history, setHistory] = useState<History | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -30,7 +28,7 @@ export function VersionHistory({ templateId }: { templateId: string }) {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    getVersionHistory(templateId, { userId })
+    getVersionHistory(templateId)
       .then((result) => {
         if (!cancelled) {
           setHistory(result)
@@ -46,7 +44,7 @@ export function VersionHistory({ templateId }: { templateId: string }) {
     return () => {
       cancelled = true
     }
-  }, [templateId, userId])
+  }, [templateId])
 
   if (loading) return <Panel><p className="text-[12.5px] opacity-55">Loading history…</p></Panel>
   if (error) return <Panel><p className="text-[12.5px] opacity-70">{error}</p></Panel>
@@ -69,17 +67,17 @@ export function VersionHistory({ templateId }: { templateId: string }) {
   )
 }
 
-function lifecycleTag(v: VersionRow) {
+function statusTag(v: VersionRow) {
+  // `Current` beats `Approved`: of many approved versions exactly one is the
+  // file the library hands out, and that is the fact a reader is looking for.
   if (v.is_current) return { label: 'Current', variant: 'accent' as const }
-  switch (v.lifecycle) {
+  switch (v.approval_status) {
     case 'pending':
-      return { label: 'Awaiting approval', variant: 'accent2' as const }
-    case 'draft':
-      return { label: 'Draft', variant: 'neutral' as const }
-    case 'superseded':
-      return { label: 'Superseded', variant: 'neutral' as const }
+      return { label: 'Awaiting review', variant: 'accent2' as const }
+    case 'rejected':
+      return { label: 'Rejected', variant: 'accent2' as const }
     default:
-      return { label: 'Published', variant: 'neutral' as const }
+      return { label: 'Approved', variant: 'neutral' as const }
   }
 }
 
@@ -92,7 +90,7 @@ function VersionRowView({
   expanded: boolean
   onToggle: () => void
 }) {
-  const tag = lifecycleTag(version)
+  const tag = statusTag(version)
   const created = new Date(version.created_at).toLocaleString()
 
   return (
@@ -108,7 +106,7 @@ function VersionRowView({
         </Tag>
         <span className="text-[12px] opacity-60 flex-[1_1_180px] min-w-[140px]">
           {version.summary}
-          {version.origin === 'generated' && version.created_by ? ` · ${version.created_by}` : ''}
+          {version.submitted_by_name ? ` · ${version.submitted_by_name}` : ''}
         </span>
         <span className="text-[11.5px] opacity-45 whitespace-nowrap">{created}</span>
       </button>
@@ -126,6 +124,19 @@ function VersionRowView({
         <div className="mt-[10px] flex flex-col gap-[10px] pl-[2px]">
           {version.intent ? (
             <p className="text-[12px] opacity-70">“{version.intent}”</p>
+          ) : null}
+
+          {/* The reviewer's own words. Shown for an approval too, not just a
+              rejection: "why was this published" is as much a part of the
+              history as "why was this refused". */}
+          {version.review_note ? (
+            <p className="text-[12px]">
+              <span className="opacity-50">
+                {version.approval_status === 'rejected' ? 'Rejected' : 'Approved'}
+                {version.reviewed_by_name ? ` by ${version.reviewed_by_name}` : ''} —{' '}
+              </span>
+              {version.review_note}
+            </p>
           ) : null}
 
           {version.changed.length ? (

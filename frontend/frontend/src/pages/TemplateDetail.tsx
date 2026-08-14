@@ -121,36 +121,52 @@ export function TemplateDetail() {
             <DownloadIcon width={16} height={16} />
             Download
           </Button>
-          <Button asChild variant="primary">
-            <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
-              <Icon name="open_in_new" size={16} />
-              Open full page
-            </a>
-          </Button>
         </div>
       </div>
 
-      {/* Metadata strip — one cell per fact the server actually records. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { icon: 'verified', label: 'Status', value: doc.status },
-          { icon: 'history', label: 'Current version', value: `v${version?.version_number ?? 1}` },
-          { icon: 'database', label: 'Size', value: version ? formatBytes(version.size_bytes) : 'unknown' },
-          {
-            icon: 'calendar_today',
-            label: 'Last updated',
-            value: new Date(version?.created_at ?? doc.created_at).toLocaleDateString(),
-          },
-        ].map((m) => (
-          <div key={m.label} className="bg-surface border border-divider rounded-card p-4">
-            <div className="text-label-md uppercase text-neutral-600 mb-2">{m.label}</div>
-            <div className="flex items-center gap-2 text-body-lg font-semibold text-ink">
-              <Icon name={m.icon} size={18} className="text-accent" />
-              <span className="truncate capitalize">{m.value}</span>
+      {/* No metadata strip: every fact it carried — status, version, size and
+          the date — is already in the File details panel beside the preview. */}
+
+      {/* Only ever renders for the submitter or an admin: the API refuses an
+          unapproved template to anyone else, so reaching this page at all means
+          the reader is entitled to know where it stands. Without it, someone
+          who has just uploaded sees a template that is simply missing from the
+          library with nothing explaining why. */}
+      {doc.approval_status !== 'approved' ? (
+        <div
+          className={`rounded-card border py-3 px-4 ${
+            doc.approval_status === 'rejected'
+              ? 'border-[color:var(--md-error)]/30 bg-[color:var(--md-error)]/10'
+              : 'border-accent2-400/40 bg-accent2-100'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <Icon
+              name={doc.approval_status === 'rejected' ? 'error' : 'pending_actions'}
+              size={20}
+              className="flex-none mt-[2px]"
+            />
+            <div className="min-w-0">
+              <div className="text-body-md font-semibold text-ink">
+                {doc.approval_status === 'rejected'
+                  ? 'Changes requested by doc control'
+                  : 'Waiting on doc control'}
+              </div>
+              <p className="text-body-md text-neutral-700 m-0">
+                {doc.approval_status === 'rejected'
+                  ? 'This version was not published. Upload a corrected file when it is ready.'
+                  : 'It is not in the library or in search results until an admin approves it. You will be notified here and by email.'}
+              </p>
+              {doc.review_note ? (
+                <p className="text-body-md text-ink m-0 mt-2">
+                  <span className="text-label-md uppercase text-neutral-600">Reviewer’s note — </span>
+                  {doc.review_note}
+                </p>
+              ) : null}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : null}
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
         <Panel className="min-w-0">
@@ -159,6 +175,15 @@ export function TemplateDetail() {
               Live preview
             </Tag>
             <span className="text-[11.5px] opacity-50 truncate">{doc.original_filename}</span>
+
+            {/* Sits with the preview it acts on rather than in the page header:
+                "open full page" means this pane, full width. */}
+            <Button asChild variant="primary" size="sm" className="ml-auto flex-none whitespace-nowrap">
+              <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
+                <Icon name="open_in_new" size={16} />
+                Open full page
+              </a>
+            </Button>
           </div>
 
           <DocumentPreview

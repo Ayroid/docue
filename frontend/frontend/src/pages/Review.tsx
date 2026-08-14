@@ -15,7 +15,6 @@ import {
   type SpecOut,
 } from '@/services/sessions'
 import { getTemplate, getTemplateRegions, type TemplateOut } from '@/services/templates'
-import { promoteVersion, PromotionApiError, type Promotion } from '@/services/promotions'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
@@ -54,8 +53,7 @@ const FMT_LABEL: Record<string, string> = { xlsx: 'XLS', docx: 'DOC', pptx: 'PPT
 export function Review() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { commitSession: recordDocument, fireToast, role, userId } = useHub()
-  const isAdmin = role === 'Admin'
+  const { commitSession: recordDocument, fireToast } = useHub()
 
   const [session, setSession] = useState<SessionOut | null>(null)
   const [template, setTemplate] = useState<TemplateOut | null>(null)
@@ -65,7 +63,6 @@ export function Review() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [committing, setCommitting] = useState(false)
-  const [note, setNote] = useState('')
 
   useEffect(() => {
     if (!sessionId) return
@@ -152,43 +149,24 @@ export function Review() {
   const lostParts = (qa?.structural.lost_parts as string[] | undefined) ?? []
 
   /**
-   * Commit, and optionally ask for the result to become the template itself.
+   * Commit, and optionally put the result forward as the template's next version.
    *
-   * The promotion is a second call rather than a flag on the commit, because it
-   * needs the version id the commit mints. A failure there is reported without
-   * losing the document: the file is compiled, stored and downloadable whatever
-   * doc control later decides, and telling someone their document was lost when
-   * only the request failed would be a lie they'd act on.
+   * `publish` is the difference, and it does not mean "publish": it points the
+   * template at this version and sends it to doc control, who decide whether it
+   * becomes what the library serves. So nothing here claims the version is live
+   * — approving is someone else's action, on the Admin page.
+   *
+   * Either way the document is compiled, stored and downloadable. A commit
+   * nobody puts forward is a perfectly good one-off document.
    */
-  const handleCommit = async (promote: boolean) => {
+  const handleCommit = async (submitAsVersion: boolean) => {
     setCommitting(true)
     setError(null)
     try {
-      const result = await commitSession(session.session_id)
+      const result = await commitSession(session.session_id, { publish: submitAsVersion })
       if (result.overall !== 'pass' || !result.result_version_id) {
         setError('QA failed on the real compile — nothing was saved.')
         return
-      }
-
-      let promoted: Promotion | null = null
-      if (promote) {
-        try {
-          promoted = await promoteVersion(
-            session.template_id,
-            result.result_version_id,
-            note.trim() || null,
-            userId,
-          )
-        } catch (err) {
-          const message =
-            err instanceof PromotionApiError && err.status === 401
-              ? 'The document was created, but you need to be signed in to submit it as a template version.'
-              : `The document was created, but the version request failed: ${
-                  err instanceof Error ? err.message : 'unknown error'
-                }`
-          setError(message)
-          return
-        }
       }
 
       const docId = recordDocument(
@@ -197,13 +175,10 @@ export function Review() {
         String(result.result_version_number ?? ''),
         (FMT_LABEL[template.format] ?? 'DOC') as never,
       )
-      // The server decides which of the two happened, not the local role.
       fireToast(
-        promoted === null
-          ? `Version ${result.result_version_number} created`
-          : promoted.status === 'approved'
-            ? `Published as v${promoted.version_number} — re-indexing now`
-            : 'Sent to doc control for approval',
+        submitAsVersion
+          ? `v${result.result_version_number} sent to doc control for approval`
+          : `Version ${result.result_version_number} created`,
       )
       navigate(`/documents/${docId}`, { state: { downloadUrl: result.download_url } })
     } catch (err) {
@@ -381,20 +356,10 @@ export function Review() {
               <div>
                 <div className="text-[13px] font-semibold">Make this the template</div>
                 <p className="text-[11.5px] opacity-60 mt-[2px]">
-                  {isAdmin
-                    ? 'Publishes as the next version. It is re-indexed, and searches return it instead of the current one.'
-                    : 'Sends it to doc control. They decide whether it becomes the next version.'}
+                  Sends it to doc control as the next version. They decide whether it replaces the
+                  current one — until then the library keeps serving the old version.
                 </p>
               </div>
-              <textarea
-                className="w-full bg-bg rounded-[8px] p-[10px] text-[12.5px] resize-y min-h-[62px]"
-                placeholder={
-                  isAdmin ? 'What changed in this version? (optional)' : 'Why should this replace the current version?'
-                }
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                disabled={committing}
-              />
               <Button
                 variant="secondary"
                 block
@@ -402,7 +367,7 @@ export function Review() {
                 disabled={committing || !qa || qa.overall !== 'pass'}
                 onClick={() => void handleCommit(true)}
               >
-                {isAdmin ? 'Create & publish as new version' : 'Create & submit for approval'}
+                Create &amp; submit as new version
               </Button>
             </div>
 
