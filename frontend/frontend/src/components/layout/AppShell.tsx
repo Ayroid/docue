@@ -44,7 +44,7 @@ export function AppShell() {
   /* The badge counts what the server actually holds. */
   const { templates, loading: templatesLoading } = useRealTemplates()
 
-  /* How many versions are waiting on doc control. Admin-only, and re-read when
+  /* How many versions are waiting on an admin. Admin-only, and re-read when
      the route changes so approving something on /admin updates the badge on
      the way back out. */
   const [pending, setPending] = useState(0)
@@ -131,7 +131,7 @@ export function AppShell() {
                   {user?.full_name || user?.username || 'Account'}
                 </div>
                 <div className="text-label-md text-neutral-700 uppercase mt-[3px]">
-                  {isAdmin ? 'Doc control' : 'Consultant'}
+                  {isAdmin ? 'Admin' : 'Consultant'}
                 </div>
               </div>
               <Avatar initials={user ? initialsOf(user.full_name, user.username) : '?'} size={32} />
@@ -224,7 +224,7 @@ export function AppShell() {
               <div className="text-label-md text-neutral-600">{lastUpload?.meta ?? 'uploaded just now'}</div>
             </div>
           </div>
-          Doc control has been notified by email and in the hub. Once an admin approves it, the template is published
+          Admins have been notified by email and in the hub. Once an admin approves it, the template is published
           to Discovery for everyone.
         </div>
       </Dialog>

@@ -41,7 +41,7 @@ const WHY_POINTS = [
 const FOOTER_COLUMNS = [
   { heading: 'Product', links: [{ label: 'Template library', href: '#cats' }, { label: 'AI auto-fill', href: '#how' }, { label: 'Version history', href: '#how' }] },
   { heading: 'Resources', links: [{ label: 'New joiner guide', href: '#how' }, { label: 'Contribute a template', href: '#cats' }, { label: 'Governance policy', href: '#why' }] },
-  { heading: 'Support', links: [{ label: 'Help centre', href: '#why' }, { label: 'Contact doc control', href: '#why' }] },
+  { heading: 'Support', links: [{ label: 'Help centre', href: '#why' }, { label: 'Contact an admin', href: '#why' }] },
 ]
 
 export function Landing() {

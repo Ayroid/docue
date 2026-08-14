@@ -110,11 +110,19 @@ export default {
           from: { background: 'var(--color-accent-100)' },
           to: { background: 'transparent' },
         },
+        /* A highlight travelling left-to-right across a placeholder. Moving
+           `background-position` rather than a child element keeps this to one
+           compositor-friendly property and means a skeleton is one div. */
+        hubshimmer: {
+          from: { backgroundPosition: '200% 0' },
+          to: { backgroundPosition: '-200% 0' },
+        },
       },
       animation: {
         hubfade: 'hubfade .35s ease both',
         'hubfade-fast': 'hubfade .3s ease both',
         hubglow: 'hubglow 2.4s ease forwards',
+        hubshimmer: 'hubshimmer 1.6s linear infinite',
       },
     },
   },

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { SEARCH_EXAMPLES } from '@/data/catalog'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
 import { Icon } from '@/components/ui/icon'
+import { SkeletonGroup, TemplateCardSkeleton } from '@/components/ui/skeleton'
 import { EmptyState, PageBody } from '@/components/common'
 import { RealTemplateCard } from '@/components/TemplateCard'
 
@@ -98,13 +99,17 @@ export function Discovery() {
         </div>
 
         {loading ? (
-          <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
-            {/* Skeletons at the card's own height so the grid doesn't jump
-                when the real rows land. */}
+          /* Was six flat grey blocks at the card's height. Same height, but the
+             card's actual anatomy now — title, meta row, action row — so the
+             wait shows what is coming rather than only where it will go. */
+          <SkeletonGroup
+            label="Loading the library"
+            className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]"
+          >
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-[232px] rounded-card bg-neutral-200 border border-divider animate-pulse" />
+              <TemplateCardSkeleton key={i} />
             ))}
-          </div>
+          </SkeletonGroup>
         ) : error ? (
           <div className="bg-surface border border-divider rounded-card p-5 text-body-md text-[color:var(--md-error)]">
             {error}

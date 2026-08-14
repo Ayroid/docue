@@ -677,6 +677,38 @@
       max-height: 34vh;
     }
   }
+
+  /* ── Skeleton placeholders ──────────────────────────────────────────────
+     One class, driven by `components/ui/skeleton.tsx`. The gradient is 200%
+     wide so the highlight has somewhere to travel from and to; the keyframe
+     slides `background-position` across it.
+
+     The base tint is `--md-surface-container-high` rather than a hard grey so
+     a skeleton reads as the surface it is standing in for, not as a hole in
+     the page. */
+  .hub-skeleton {
+    background-color: var(--md-surface-container-high);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, #fff 62%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+  }
+
+  /* Vestibular disorders are triggered by exactly this kind of continuous
+     travelling motion, and a skeleton is on screen for as long as the network
+     takes. The placeholder still reads as "content pending" without it — the
+     shape and the tint carry that on their own — so the animation is dropped
+     rather than substituted. */
+  @media (prefers-reduced-motion: reduce) {
+    .hub-skeleton {
+      background-image: none;
+      animation: none !important;
+    }
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
