@@ -139,7 +139,10 @@ async function post<T>(path: string, body: unknown, withAuth = false): Promise<T
 
 export interface RegisterPayload {
   email: string
-  username: string
+  /** Optional — omit it and the server derives one from the email address,
+      guaranteeing it is free. Better than refusing a registration over a field
+      nobody wanted to fill in. */
+  username?: string
   password: string
   full_name?: string
 }

@@ -131,10 +131,6 @@ export function Admin() {
           <Icon name="refresh" size={18} />
           {loading ? 'Refreshing…' : 'Refresh'}
         </Button>
-        <Button variant="primary" className="flex-none" onClick={() => navigate('/upload')}>
-          <Icon name="add" size={18} />
-          Upload template
-        </Button>
       </div>
 
       <Segmented
