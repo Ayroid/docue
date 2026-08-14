@@ -60,11 +60,11 @@ export function UpdateTemplate() {
         className="py-1 px-2 mb-[6px] whitespace-nowrap"
         onClick={() => navigate(`/templates/${id}`)}
       >
-        Back to the document
+        Back to the template
       </Button>
 
       <PageHeading
-        title="Update document"
+        title="Update template"
         subtitle={
           template
             ? `${template.title}${current ? ` — currently v${current}` : ''}. Whichever route you pick, the result is submitted as v${(current ?? 1) + 1} and goes to doc control for approval before it replaces the current version.`

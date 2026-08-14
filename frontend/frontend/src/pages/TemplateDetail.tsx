@@ -163,6 +163,14 @@ export function TemplateDetail() {
           <p className="text-body-md text-neutral-700 m-0 truncate">{doc.original_filename}</p>
         </div>
         <div className="flex gap-2 flex-none">
+          {/* The page's whole point: a template is here to be turned into a
+              document. Same destination as the card's "Use document" — this
+              page is the other way into that flow, so it must not be a dead end
+              that only offers the file. */}
+          <Button variant="primary" onClick={() => navigate(`/templates/${doc.id}/generate`)}>
+            <Icon name="note_add" size={18} />
+            Create document
+          </Button>
           <Button variant="secondary" onClick={handleDownload}>
             <DownloadIcon width={16} height={16} />
             Download
@@ -258,18 +266,18 @@ export function TemplateDetail() {
             </div>
 
             {/* Directly under the metadata it acts on: this changes what the
-                facts above will say. It leads to a choice rather than doing
-                anything, so it is a secondary button and says "Update", not
-                "Upload" or "Edit" — either of those would name one of the two
-                routes and hide the other. */}
+                facts above will say. It says "Update", not "Upload" or "Edit" —
+                either of those would name one of the two routes it leads to and
+                hide the other — and "template", because a template is what this
+                page holds. The document is what Create document produces. */}
             <Button
-              variant="secondary"
+              variant="primary"
               block
               className="mt-5 whitespace-nowrap"
               onClick={() => navigate(`/templates/${doc.id}/update`)}
             >
               <Icon name="edit_document" size={18} />
-              Update document
+              Update template
             </Button>
           </div>
 
