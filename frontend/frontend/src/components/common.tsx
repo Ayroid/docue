@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import type { Fmt } from '@/data/catalog'
-import { PREVIEW_LINES } from '@/data/demo'
 import type { TemplateFormat } from '@/services/templates'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -59,8 +58,13 @@ export function Avatar({ initials, size = 34 }: { initials: string; size?: numbe
 }
 
 /**
- * Marks a screen whose content is scripted rather than real. Used across the
- * generation walkthrough, which has no service behind it — see `data/demo.ts`.
+ * Marks a screen whose content is held in this tab only.
+ *
+ * It used to mean "scripted": the generation walkthrough had no service behind
+ * it and everything on it came from `data/demo.ts`. That is no longer true —
+ * documents are compiled by the backend and stored as real versions. What is
+ * still tab-local is the *list* of them, because there is no per-user document
+ * history endpoint yet, so the two pages below lose their rows on reload.
  */
 export function DemoBadge({ className }: { className?: string }) {
   return (
@@ -69,17 +73,33 @@ export function DemoBadge({ className }: { className?: string }) {
         'inline-flex items-center gap-[6px] rounded-tag border border-dashed border-accent2-400 bg-accent2-100 text-accent2-900 text-[11px] font-semibold uppercase tracking-[.08em] py-[3px] px-[9px] whitespace-nowrap',
         className,
       )}
-      title="Scripted walkthrough — the document produced here is not stored anywhere"
+      title="This list is held in your browser only — the documents themselves are stored server-side"
     >
       Demo
     </span>
   )
 }
 
+/* Bar widths for the body-text skeleton. Pure presentation — it lived in
+   `data/demo.ts` alongside the generation fixtures and came back here when
+   those were deleted, since it describes no document. */
+const PREVIEW_LINES = [
+  { h: '11px', w: '42%', mb: '18px' },
+  { h: '9px', w: '100%', mb: '9px' },
+  { h: '9px', w: '96%', mb: '9px' },
+  { h: '9px', w: '88%', mb: '22px' },
+  { h: '11px', w: '34%', mb: '18px' },
+  { h: '9px', w: '100%', mb: '9px' },
+  { h: '9px', w: '92%', mb: '9px' },
+  { h: '9px', w: '76%', mb: '22px' },
+  { h: '9px', w: '100%', mb: '9px' },
+  { h: '9px', w: '64%', mb: '0' },
+]
+
 /**
- * The grey bar skeleton standing in for rendered document body text, used by
- * the generation walkthrough's preview. Real documents are rendered from their
- * actual bytes by `features/document-preview` instead.
+ * The grey bar skeleton standing in for rendered document body text. Real
+ * documents are rendered from their actual bytes by `features/document-preview`
+ * instead.
  */
 export function PreviewLines({ lines = PREVIEW_LINES, flat = false }: { lines?: typeof PREVIEW_LINES; flat?: boolean }) {
   return (

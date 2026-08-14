@@ -7,6 +7,13 @@ import { useRealTemplates } from '@/features/document-library/useRealTemplates'
 import { saveTemplateToDisk } from '@/features/document-library/saveToDisk'
 import { DocumentPreview } from '@/features/document-preview/DocumentPreview'
 import { Button } from '@/components/ui/button'
+import { Icon } from '@/components/ui/icon'
+import {
+  DocumentPreviewSkeleton,
+  DocumentRowSkeleton,
+  Skeleton,
+  SkeletonGroup,
+} from '@/components/ui/skeleton'
 import { Tag } from '@/components/ui/tag'
 import { Segmented } from '@/components/ui/segmented'
 import { Panel, SectionLabel } from '@/components/ui/table'
@@ -78,10 +85,17 @@ export function DocumentLibrary() {
 
   return (
     <PageBody>
-      <PageHeading
-        title="Document library"
-        subtitle="Every uploaded template, rendered in the browser — no Office install, no download needed."
-      />
+      <div className="flex items-center gap-4 flex-wrap">
+        <PageHeading
+          className="flex-1 min-w-0"
+          title="Document library"
+          subtitle="Every uploaded template, rendered in the browser — no Office install, no download needed."
+        />
+        <Button variant="primary" className="flex-none" onClick={() => navigate('/upload')}>
+          <Icon name="add" size={18} />
+          Upload template
+        </Button>
+      </div>
 
       {error ? (
         <Panel>
@@ -119,7 +133,14 @@ export function DocumentLibrary() {
 
             <div className="doc-library-list">
               {loading ? (
-                <p className="text-[13px] opacity-60 m-0 py-6 text-center">Loading documents…</p>
+                /* Eight rows because the rail shows roughly that many before
+                   it scrolls — enough that the list arrives into a filled
+                   column rather than growing into one. */
+                <SkeletonGroup label="Loading documents" className="flex flex-col gap-[2px]">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <DocumentRowSkeleton key={i} />
+                  ))}
+                </SkeletonGroup>
               ) : filtered.length === 0 ? (
                 <p className="text-[13px] opacity-60 m-0 py-6 text-center">Nothing matches that filter.</p>
               ) : (
@@ -206,9 +227,30 @@ export function DocumentLibrary() {
                   </Button>
                 </div>
               </>
+            ) : loading ? (
+              /* The reader is about to auto-select the first document, so this
+                 pane is genuinely pending rather than idle — a skeleton says
+                 that, where "Pick a document" would be an instruction the page
+                 is about to carry out itself. */
+              <>
+                <div className="flex items-start gap-3 mb-[14px]">
+                  <div className="flex-1 min-w-0 flex flex-col gap-2">
+                    <Skeleton height={10} width={88} rounded="sm" />
+                    <Skeleton height={16} width="46%" />
+                    <Skeleton height={11} width="68%" rounded="sm" />
+                  </div>
+                  <Skeleton width={38} height={22} rounded="pill" className="flex-none" />
+                </div>
+                <DocumentPreviewSkeleton />
+                <div className="flex gap-2 mt-[14px]">
+                  <Skeleton width={116} height={32} rounded="pill" />
+                  <Skeleton width={104} height={32} rounded="pill" />
+                  <Skeleton width={92} height={32} rounded="pill" />
+                </div>
+              </>
             ) : (
               <p className="text-[13px] opacity-60 m-0 py-10 text-center">
-                {loading ? 'Loading documents…' : 'Pick a document on the left to read it here.'}
+                Pick a document on the left to read it here.
               </p>
             )}
           </Panel>

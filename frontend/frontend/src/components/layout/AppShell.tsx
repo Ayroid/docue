@@ -1,42 +1,77 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useHub } from '@/store/HubProvider'
+import { useAuth } from '@/store/AuthProvider'
 import { useRealTemplates } from '@/features/document-library/useRealTemplates'
+import { NotificationBell } from '@/features/notifications/NotificationBell'
+import { listApprovals } from '@/services/notifications'
 import { cn, extOf } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Icon } from '@/components/ui/icon'
 import { Avatar, FormatChip } from '@/components/common'
 
+/** Initials for the avatar, from whatever name the account actually has.
+ *
+ *  Falls back to the username when `full_name` is null — registration does not
+ *  require a real name, and an empty disc looks like a rendering fault. */
+function initialsOf(fullName: string | null, username: string): string {
+  const source = (fullName || username).trim()
+  const parts = source.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return source.slice(0, 2).toUpperCase() || '?'
+}
+
 /**
- * The signed-in shell: a fixed brand bar with global search, a tab strip
- * beneath it, and the two pieces of global chrome the app hangs off its root —
- * the toast and the "sent for approval" dialog.
+ * The signed-in shell: a fixed brand bar, a tab strip beneath it, and the two
+ * pieces of global chrome the app hangs off its root — the toast and the "sent
+ * for approval" dialog.
+ *
+ * No search field up here: Discovery's hero owns the search box, so a second
+ * one in the chrome only duplicated it on every page.
  *
  * The design puts navigation across the top rather than down the side, so the
  * old sidebar's collapse toggle now drives a mobile nav drawer; `sidebarOpen`
  * and `toggleSidebar` keep their meaning.
  */
 export function AppShell() {
-  const { sidebarOpen, toggleSidebar, role, uploads, toast, uploadDialogOpen, closeUploadDialog, lastUpload, logout } =
-    useHub()
+  const { sidebarOpen, toggleSidebar, toast, uploadDialogOpen, closeUploadDialog, lastUpload } = useHub()
+  const { user, isAdmin, signOut: endSession } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [query, setQuery] = useState('')
 
   /* The badge counts what the server actually holds. */
   const { templates, loading: templatesLoading } = useRealTemplates()
 
+  /* How many versions are waiting on an admin. Admin-only, and re-read when
+     the route changes so approving something on /admin updates the badge on
+     the way back out. */
+  const [pending, setPending] = useState(0)
+  useEffect(() => {
+    if (!isAdmin) {
+      setPending(0)
+      return
+    }
+    let cancelled = false
+    listApprovals('pending')
+      .then((queue) => {
+        if (!cancelled) setPending(queue.pending)
+      })
+      .catch(() => {
+        /* A failed count leaves the badge off rather than showing a wrong
+           number — an admin who sees no badge checks the panel anyway. */
+        if (!cancelled) setPending(0)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin, location.pathname])
+
   const signOut = () => {
     setSettingsOpen(false)
-    logout()
+    endSession()
     navigate('/')
-  }
-
-  const search = (e: FormEvent) => {
-    e.preventDefault()
-    navigate(`/search?q=${encodeURIComponent(query)}`)
   }
 
   const navItems = [
@@ -46,7 +81,7 @@ export function AppShell() {
        would be invented. */
     { to: '/documents', label: 'My Documents', badge: '' },
     { to: '/analytics', label: 'Analytics', badge: 'SOON' },
-    ...(role === 'Admin' ? [{ to: '/admin', label: 'Admin', badge: uploads.length ? String(uploads.length) : '' }] : []),
+    ...(isAdmin ? [{ to: '/admin', label: 'Admin', badge: pending ? String(pending) : '' }] : []),
   ]
 
   /* Discovery owns the library, search, template detail, generate and review
@@ -74,19 +109,6 @@ export function AppShell() {
             </span>
           </Link>
 
-          <form onSubmit={search} className="flex-1 max-w-2xl hidden md:block">
-            <div className="relative flex items-center">
-              <Icon name="search" size={20} className="absolute left-4 text-neutral-500 pointer-events-none" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search templates…"
-                aria-label="Search templates"
-                className="input pl-12"
-              />
-            </div>
-          </form>
-
           <div className="flex items-center gap-2 relative">
             <Button
               variant="bare"
@@ -97,9 +119,7 @@ export function AppShell() {
             >
               <Icon name={sidebarOpen ? 'close' : 'menu'} size={22} />
             </Button>
-            <Button variant="bare" size="icon" className="hover:bg-neutral-200 text-neutral-700" title="Notifications">
-              <Icon name="notifications" size={22} />
-            </Button>
+            <NotificationBell />
             <button
               type="button"
               className="flex items-center gap-3 ml-1 bg-transparent border-0 cursor-pointer font-[inherit] p-0"
@@ -107,12 +127,14 @@ export function AppShell() {
               title="Account"
             >
               <div className="text-right hidden lg:block">
-                <div className="text-body-md font-bold text-ink leading-none">Riya Mehta</div>
+                <div className="text-body-md font-bold text-ink leading-none">
+                  {user?.full_name || user?.username || 'Account'}
+                </div>
                 <div className="text-label-md text-neutral-700 uppercase mt-[3px]">
-                  {role === 'Admin' ? 'Doc control' : 'Consultant'}
+                  {isAdmin ? 'Admin' : 'Consultant'}
                 </div>
               </div>
-              <Avatar initials="RM" size={32} />
+              <Avatar initials={user ? initialsOf(user.full_name, user.username) : '?'} size={32} />
             </button>
 
             {settingsOpen ? (
@@ -202,7 +224,7 @@ export function AppShell() {
               <div className="text-label-md text-neutral-600">{lastUpload?.meta ?? 'uploaded just now'}</div>
             </div>
           </div>
-          Doc control has been notified by email and in the hub. Once an admin approves it, the template is published
+          Admins have been notified by email and in the hub. Once an admin approves it, the template is published
           to Discovery for everyone.
         </div>
       </Dialog>

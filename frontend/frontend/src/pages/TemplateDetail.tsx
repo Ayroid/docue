@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Panel, SectionLabel } from '@/components/ui/table'
 import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/common'
+import { VersionHistory } from '@/components/VersionHistory'
 import { Icon } from '@/components/ui/icon'
+import { DocumentPreviewSkeleton, Skeleton, SkeletonGroup } from '@/components/ui/skeleton'
 import { DownloadIcon } from '@/components/icons'
 
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
@@ -86,7 +88,49 @@ export function TemplateDetail() {
             action={{ label: 'Back to Discovery', onClick: () => navigate('/discovery') }}
           />
         ) : (
-          <p className="text-[13px] opacity-60 py-16 text-center m-0">Loading document…</p>
+          /* The real page's own shape — breadcrumb, title block, then the
+             preview beside its details rail. Landing on this and then having it
+             replaced in place is the point; the single centred line it replaced
+             threw the whole layout in at once. */
+          <SkeletonGroup label="Loading document" className="flex flex-col gap-6">
+            <div className="flex items-center gap-2">
+              <Skeleton height={12} width={72} rounded="sm" />
+              <Skeleton height={12} width={40} rounded="sm" />
+              <Skeleton height={12} width={140} rounded="sm" />
+            </div>
+
+            <div className="flex items-start gap-4">
+              <Skeleton width={40} height={40} rounded="md" className="flex-none" />
+              <div className="min-w-0 flex-1 flex flex-col gap-2">
+                <Skeleton height={24} width="44%" />
+                <Skeleton height={13} width="30%" rounded="sm" />
+              </div>
+              <Skeleton width={124} height={38} rounded="pill" className="flex-none" />
+            </div>
+
+            <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
+              <div className="bg-surface border border-divider rounded-card p-5 min-w-0">
+                <div className="flex items-center gap-2 mb-[14px]">
+                  <Skeleton width={86} height={22} rounded="pill" />
+                  <Skeleton height={11} width={150} rounded="sm" />
+                  <Skeleton width={128} height={30} rounded="pill" className="ml-auto" />
+                </div>
+                <DocumentPreviewSkeleton />
+              </div>
+
+              <div className="bg-surface border border-divider rounded-card p-5">
+                <Skeleton height={11} width={78} rounded="sm" className="mb-4" />
+                <div className="flex flex-col gap-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex justify-between gap-3 border-t border-divider pt-3 first:border-0 first:pt-0">
+                      <Skeleton height={12} width={64} rounded="sm" />
+                      <Skeleton height={12} width={88} rounded="sm" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </SkeletonGroup>
         )}
       </PageBody>
     )
@@ -120,36 +164,52 @@ export function TemplateDetail() {
             <DownloadIcon width={16} height={16} />
             Download
           </Button>
-          <Button asChild variant="primary">
-            <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
-              <Icon name="open_in_new" size={16} />
-              Open full page
-            </a>
-          </Button>
         </div>
       </div>
 
-      {/* Metadata strip — one cell per fact the server actually records. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { icon: 'verified', label: 'Status', value: doc.status },
-          { icon: 'history', label: 'Current version', value: `v${version?.version_number ?? 1}` },
-          { icon: 'database', label: 'Size', value: version ? formatBytes(version.size_bytes) : 'unknown' },
-          {
-            icon: 'calendar_today',
-            label: 'Last updated',
-            value: new Date(version?.created_at ?? doc.created_at).toLocaleDateString(),
-          },
-        ].map((m) => (
-          <div key={m.label} className="bg-surface border border-divider rounded-card p-4">
-            <div className="text-label-md uppercase text-neutral-600 mb-2">{m.label}</div>
-            <div className="flex items-center gap-2 text-body-lg font-semibold text-ink">
-              <Icon name={m.icon} size={18} className="text-accent" />
-              <span className="truncate capitalize">{m.value}</span>
+      {/* No metadata strip: every fact it carried — status, version, size and
+          the date — is already in the File details panel beside the preview. */}
+
+      {/* Only ever renders for the submitter or an admin: the API refuses an
+          unapproved template to anyone else, so reaching this page at all means
+          the reader is entitled to know where it stands. Without it, someone
+          who has just uploaded sees a template that is simply missing from the
+          library with nothing explaining why. */}
+      {doc.approval_status !== 'approved' ? (
+        <div
+          className={`rounded-card border py-3 px-4 ${
+            doc.approval_status === 'rejected'
+              ? 'border-[color:var(--md-error)]/30 bg-[color:var(--md-error)]/10'
+              : 'border-accent2-400/40 bg-accent2-100'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <Icon
+              name={doc.approval_status === 'rejected' ? 'error' : 'pending_actions'}
+              size={20}
+              className="flex-none mt-[2px]"
+            />
+            <div className="min-w-0">
+              <div className="text-body-md font-semibold text-ink">
+                {doc.approval_status === 'rejected'
+                  ? 'Rejected by an admin'
+                  : 'Waiting on an admin'}
+              </div>
+              <p className="text-body-md text-neutral-700 m-0">
+                {doc.approval_status === 'rejected'
+                  ? 'This version was not published. Upload a corrected file when it is ready.'
+                  : 'It is not in the library or in search results until an admin approves it. You will be notified here and by email.'}
+              </p>
+              {doc.review_note ? (
+                <p className="text-body-md text-ink m-0 mt-2">
+                  <span className="text-label-md uppercase text-neutral-600">Reviewer’s note — </span>
+                  {doc.review_note}
+                </p>
+              ) : null}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : null}
 
       <div className="hub-results grid grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
         <Panel className="min-w-0">
@@ -158,6 +218,15 @@ export function TemplateDetail() {
               Live preview
             </Tag>
             <span className="text-[11.5px] opacity-50 truncate">{doc.original_filename}</span>
+
+            {/* Sits with the preview it acts on rather than in the page header:
+                "open full page" means this pane, full width. */}
+            <Button asChild variant="primary" size="sm" className="ml-auto flex-none whitespace-nowrap">
+              <a href={`/viewer/${doc.id}`} target="_blank" rel="noopener noreferrer">
+                <Icon name="open_in_new" size={16} />
+                Open full page
+              </a>
+            </Button>
           </div>
 
           <DocumentPreview
@@ -184,7 +253,25 @@ export function TemplateDetail() {
                 </div>
               ))}
             </div>
+
+            {/* Directly under the metadata it acts on: this changes what the
+                facts above will say. It leads to a choice rather than doing
+                anything, so it is a secondary button and says "Update", not
+                "Upload" or "Edit" — either of those would name one of the two
+                routes and hide the other. */}
+            <Button
+              variant="secondary"
+              block
+              className="mt-5 whitespace-nowrap"
+              onClick={() => navigate(`/templates/${doc.id}/update`)}
+            >
+              <Icon name="edit_document" size={18} />
+              Update document
+            </Button>
           </div>
+
+          {/* Every version of this template, with what each one changed. */}
+          <VersionHistory templateId={doc.id} />
         </div>
       </div>
     </PageBody>

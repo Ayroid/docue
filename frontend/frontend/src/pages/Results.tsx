@@ -8,6 +8,7 @@ import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
 import { Icon } from '@/components/ui/icon'
+import { ResultListSkeleton } from '@/components/ui/skeleton'
 import { CHIP_BY_FORMAT, EmptyState, FormatChip, PageBody } from '@/components/common'
 
 /* Only format is offered. The backend records no owner, version status or
@@ -138,7 +139,12 @@ export function Results() {
                 body="Only templates that finished indexing are searchable. Try fewer words, or clear the format filter."
                 action={{ label: 'Clear search', onClick: () => setParams({ q: '' }) }}
               />
-            ) : null
+            ) : (
+              /* Was `null`: a search in flight left the column blank, which
+                 reads the same as "no matches" right up until the results
+                 appear. */
+              <ResultListSkeleton label="Searching the library" />
+            )
           ) : browse.length ? (
             browse.map((t, i) => (
               <article
@@ -191,7 +197,9 @@ export function Results() {
               body="Upload a .docx, .xlsx or .pptx, or clear the format filter."
               action={{ label: 'Clear filter', onClick: () => setFormat('all') }}
             />
-          ) : null}
+          ) : (
+            <ResultListSkeleton label="Loading the library" />
+          )}
         </div>
       </div>
     </PageBody>

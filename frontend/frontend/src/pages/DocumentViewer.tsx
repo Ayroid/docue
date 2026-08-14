@@ -6,6 +6,7 @@ import { saveTemplateToDisk } from '@/features/document-library/saveToDisk'
 import { DocumentStage } from '@/features/document-preview/DocumentStage'
 import { Button } from '@/components/ui/button'
 import { Tag } from '@/components/ui/tag'
+import { DocumentPreviewSkeleton } from '@/components/ui/skeleton'
 import { DownloadIcon } from '@/components/icons'
 
 type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | { state: 'failed'; message: string }
@@ -15,9 +16,15 @@ type Load = { state: 'loading' } | { state: 'ready'; template: TemplateOut } | {
  *
  * Deliberately outside `AppShell`: this route is meant to be a browser tab you
  * read a document in, so it gets the full window width rather than sharing it
- * with the app's sidebar. It is also ungated — `loggedIn` lives in memory only
- * (`store/HubProvider`), so a freshly-opened tab is always logged out and a
- * session check here would bounce every one of these links to the landing page.
+ * with the app's sidebar.
+ *
+ * It *is* session-gated, which it could not be before: the session used to live
+ * in memory, so a freshly-opened tab was always signed out and a check here
+ * would have bounced every one of these links to the landing page. The token is
+ * in `localStorage` now, so a new tab carries the session and the guard costs
+ * these links nothing. It also has to be gated — an unapproved template is
+ * refused to everyone but its submitter and the admins, and reaching that
+ * decision needs the request to be authenticated.
  */
 export function DocumentViewer() {
   const { id } = useParams()
@@ -94,7 +101,12 @@ export function DocumentViewer() {
         {load.state === 'failed' ? (
           <p className="text-[14px] text-accent2-700 text-center py-20 px-5 m-0">{load.message}</p>
         ) : (
-          <p className="text-[13px] opacity-60 text-center py-20 px-5 m-0">Opening document…</p>
+          /* The format is unknown until the metadata lands, so this is always
+             the page variant -- a grid here would be a guess, and guessing
+             wrong means the placeholder and the render disagree. */
+          <div className="max-w-[900px] mx-auto py-8 px-[clamp(14px,3vw,28px)]">
+            <DocumentPreviewSkeleton />
+          </div>
         )}
       </div>
     )
