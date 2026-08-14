@@ -39,7 +39,10 @@ export function Generate() {
 
   const submit = async (skip = false) => {
     const value = chatInput.trim()
-    if ((!value && !skip) || done || sending) return
+    if ((!value && !skip) || sending) return
+    // `done` is no longer a gate. With no question left the message becomes an
+    // instruction, which is the only way to say "change the heading" at all.
+    if (done && (skip || !value)) return
     setChatInput('')
     await send(value, { skip })
   }
@@ -179,7 +182,19 @@ function Conversation({
                 {m.chips?.length ? (
                   <div className="flex gap-[7px] flex-wrap justify-end">
                     {m.chips.map((c) => (
-                      <Tag key={c.key} variant="outline" className="whitespace-nowrap">
+                      // A volunteered value went somewhere the user was not
+                      // looking. Badging it is what makes that checkable rather
+                      // than something they have to trust.
+                      <Tag
+                        key={`${c.source ?? 'answer'}:${c.key}`}
+                        variant={c.source === 'volunteered' ? 'accent' : 'outline'}
+                        className="whitespace-nowrap"
+                        title={
+                          c.source === 'volunteered'
+                            ? 'Also captured from that message — not asked for'
+                            : undefined
+                        }
+                      >
                         <span className="opacity-55">{c.key}</span>&nbsp;{c.value}
                       </Tag>
                     ))}
@@ -199,7 +214,8 @@ function Conversation({
               <div className="flex justify-start">
                 <div className="max-w-[82%] py-[11px] px-[14px] rounded-[12px] text-[14px] leading-[1.5] bg-accent-100 text-accent-900">
                   That’s everything — {progress.fields_filled} of {progress.fields_total} regions
-                  are filled. Review and commit when you’re ready.
+                  are filled. Tell me about anything you want changed, or review and commit when
+                  you’re ready.
                 </div>
               </div>
             ) : null}
@@ -221,28 +237,38 @@ function Conversation({
                   void submit()
                 }
               }}
-              placeholder={done ? 'All done' : 'Answer in your own words…'}
-              disabled={done || sending}
+              placeholder={
+                done
+                  ? 'Change anything — “change the heading to Q3 Review”…'
+                  : 'Answer in your own words…'
+              }
+              // Running out of questions is not running out of things to say.
+              // The composer stays open once the interview ends, and what goes
+              // through it is an instruction rather than an answer.
+              disabled={sending}
               rows={Math.min(5, Math.max(1, chatInput.split('\n').length + Math.floor(chatInput.length / 58)))}
               className="flex-1 resize-none leading-[1.5] max-h-[140px] min-h-0"
             />
             <Button
               variant="primary"
               className="whitespace-nowrap"
-              disabled={!chatInput.trim() || done || sending}
+              disabled={!chatInput.trim() || sending}
               onClick={() => void submit()}
             >
-              {sending ? 'Reading…' : 'Send'}
+              {sending ? 'Reading…' : done ? 'Apply' : 'Send'}
             </Button>
-            <Button
-              variant="secondary"
-              className="whitespace-nowrap"
-              disabled={done || sending}
-              onClick={() => void submit(true)}
-              title="Leave these regions untouched"
-            >
-              Skip
-            </Button>
+            {/* Skipping is only meaningful while a question is on the table. */}
+            {done ? null : (
+              <Button
+                variant="secondary"
+                className="whitespace-nowrap"
+                disabled={sending}
+                onClick={() => void submit(true)}
+                title="Leave these regions untouched"
+              >
+                Skip
+              </Button>
+            )}
           </div>
         </div>
 

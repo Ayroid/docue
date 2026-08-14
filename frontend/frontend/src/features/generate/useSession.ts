@@ -5,11 +5,13 @@ import {
   getSession,
   getSpec,
   sendAnswer as postAnswer,
+  sendInstruction as postInstruction,
   startSession,
   type AnswerOut,
   type ProgressOut,
   type QuestionOut,
   type SessionOut,
+  type TurnOut,
   type SpecOut,
   type Tier,
 } from '@/services/sessions'
@@ -27,8 +29,20 @@ const EMPTY_PROGRESS: ProgressOut = {
 export interface ChatMessage {
   role: 'agent' | 'user'
   text: string
-  chips?: { key: string; value: string }[]
+  chips?: { key: string; value: string; source?: 'answer' | 'volunteered' }[]
 }
+
+/** An instruction is a turn in the transcript but answers no question. */
+const isAnswer = (turn: TurnOut) => (turn.kind ?? 'answer') !== 'instruction'
+
+/**
+ * How many planned questions have been answered.
+ *
+ * Not `turns.length`. Instructions live in the same list, and counting one would
+ * advance the question pointer past a question the user was never asked — the
+ * client-side twin of `answered_count` in `app/conversation/state.py`.
+ */
+const answeredCount = (session: SessionOut) => session.turns.filter(isAnswer).length
 
 export interface SessionState {
   loading: boolean
@@ -55,25 +69,52 @@ export interface SessionState {
   reload: () => void
 }
 
+const shown = (value: unknown) =>
+  Array.isArray(value) ? `${value.length} row(s)` : String(value)
+
+/**
+ * The transcript, walked in the order it happened.
+ *
+ * Turns are no longer one-per-question and cannot be zipped against the plan by
+ * index: a free-form instruction is a turn that answers nothing, and pairing
+ * `turns[i]` with `questions[i]` after one of those would caption every later
+ * answer with the wrong question. The question is emitted when the answer that
+ * replies to it comes up, and instructions fall through as plain user messages.
+ */
 function messagesFrom(session: SessionOut | null, questions: QuestionOut[]): ChatMessage[] {
   if (!session) return []
   const out: ChatMessage[] = []
+  let asked = 0
 
-  for (let i = 0; i < questions.length && i <= session.turns.length; i++) {
-    out.push({ role: 'agent', text: questions[i].question_text })
-    const turn = session.turns[i]
-    if (!turn) continue
+  for (const turn of session.turns) {
+    if (isAnswer(turn)) {
+      const question = questions[asked]
+      if (question) out.push({ role: 'agent', text: question.question_text })
+      asked += 1
+    }
     out.push({
       role: 'user',
       text: turn.skipped ? '(skipped)' : turn.answer,
       // Rebuilt from the stored extraction, so a reload shows the same chips
       // the answer response did rather than losing them.
-      chips: Object.entries(turn.extracted).map(([key, value]) => ({
-        key,
-        value: Array.isArray(value) ? `${value.length} row(s)` : String(value),
-      })),
+      chips: [
+        ...Object.entries(turn.extracted).map(([key, value]) => ({
+          key,
+          value: shown(value),
+          source: 'answer' as const,
+        })),
+        ...Object.entries(turn.volunteered ?? {}).map(([key, value]) => ({
+          key,
+          value: shown(value),
+          source: 'volunteered' as const,
+        })),
+      ],
     })
   }
+
+  // The question still on the table, asked but not yet answered.
+  const pending = questions[asked]
+  if (pending) out.push({ role: 'agent', text: pending.question_text })
   return out
 }
 
@@ -163,17 +204,22 @@ export function useSession(
   const send = useCallback(
     async (answer: string, opts: { skip?: boolean } = {}) => {
       if (!session) return
-      const question = session.questions[session.turns.length]
-      if (!question) return
+      const question = session.questions[answeredCount(session)] ?? null
+      // No question left, but the user still has something to say — that is an
+      // instruction, not a dead end. Skipping is meaningless without a question
+      // to skip, so it is only offered on the answer path.
+      if (!question && (opts.skip || !answer.trim())) return
 
       setSending(true)
       setError(null)
       try {
-        const turn: AnswerOut = await postAnswer(session.session_id, {
-          questionId: question.question_id,
-          answer,
-          skip: opts.skip,
-        })
+        const turn: AnswerOut = question
+          ? await postAnswer(session.session_id, {
+              questionId: question.question_id,
+              answer,
+              skip: opts.skip,
+            })
+          : await postInstruction(session.session_id, answer)
         setWarnings(turn.warnings)
         setDegraded(turn.degraded)
 
@@ -196,7 +242,7 @@ export function useSession(
   )
 
   const questions = session?.questions ?? []
-  const currentQuestion = session ? (session.questions[session.turns.length] ?? null) : null
+  const currentQuestion = session ? (session.questions[answeredCount(session)] ?? null) : null
 
   const spec = useMemo(
     () => (specBody ? toChangeSpec(specBody.spec) : EMPTY_SPEC),

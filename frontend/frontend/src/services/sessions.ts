@@ -35,10 +35,14 @@ export interface ProgressOut {
 }
 
 export interface TurnOut {
+  /** `answer` replies to a planned question; `instruction` is a free-form edit. */
+  kind?: 'answer' | 'instruction'
   question_id: string
   question_text: string
   answer: string
   extracted: Record<string, unknown>
+  /** Values the same message supplied about regions the question did not ask about. */
+  volunteered?: Record<string, unknown>
   skipped: boolean
   /** The extractor was unavailable; the raw answer was kept and can be re-read. */
   degraded: boolean
@@ -47,6 +51,8 @@ export interface TurnOut {
 export interface ChipOut {
   key: string
   value: string
+  /** `answer` if the question asked for it, `volunteered` if the user offered it. */
+  source?: 'answer' | 'volunteered'
 }
 
 export interface DerivedValue {
@@ -84,6 +90,8 @@ export interface SessionCreateOut extends SessionOut {
 export interface AnswerOut {
   session_id: string
   extracted: Record<string, unknown>
+  /** Regions this message set beyond what was asked. Already written. */
+  volunteered?: Record<string, unknown>
   chips: ChipOut[]
   /** Only populated on the final turn — the deriver runs once, not per answer. */
   derived: Record<string, DerivedValue>
@@ -250,6 +258,21 @@ export function sendAnswer(
   return post<AnswerOut>(
     `/sessions/${sessionId}/answer`,
     { question_id: input.questionId, answer: input.answer, skip: input.skip ?? false },
+    'Session not found.',
+  )
+}
+
+/**
+ * A free-form edit that answers no question.
+ *
+ * "Change the heading to Q3 Review." Available for as long as the session is
+ * active, including after the last question — which is when someone reads the
+ * preview and wants a word changed, and when `sendAnswer` returns a 409.
+ */
+export function sendInstruction(sessionId: string, instruction: string): Promise<AnswerOut> {
+  return post<AnswerOut>(
+    `/sessions/${sessionId}/instruct`,
+    { instruction },
     'Session not found.',
   )
 }
