@@ -49,6 +49,12 @@ class Template(Base):
     metadata_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     metadata_prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     embedded_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Who uploaded it. Nullable because every template that predates accounts
+    # has no owner and inventing one would be a lie; the approval notification
+    # falls back to the admins when it is null.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("template_versions.id", use_alter=True, name="fk_templates_current_version"), nullable=True
     )

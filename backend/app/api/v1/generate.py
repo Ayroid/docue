@@ -6,12 +6,13 @@ That line is described in the plan as "the whole project", and until now it only
 existed inside `scripts/`. This is it over HTTP.
 
 **Why this hangs off a version rather than a session.** Plan §6 puts compile and
-commit under `POST /sessions/{sid}/compile`. They are there now -- but they call
-`compile_and_store` below rather than reimplementing it, because a spec is a
-spec whether a model or a human wrote it, and the deterministic half never
-needed the conversation. Building it the other way round would have meant the
-compile path waiting on the agent chain; instead the chain arrived to find its
-compiler already written and already tested.
+commit under `POST /sessions/{sid}/compile`, and it should end up there. But the
+conversational layer -- context agent, question planner, extractor, deriver --
+does not exist yet, and the deterministic half does not need it: a spec is a
+spec whether a model or a human wrote it. So the service lives here, addressed
+by the version it applies to, and `/sessions/{sid}/compile` becomes a thin
+wrapper that looks up the session's spec and calls this. Building it the other
+way round would have meant the compile path waiting on the conversation.
 
 **Why the schema is re-detected rather than read from `document_regions`.** The
 regions are persisted, but a spec must be resolved against the schema of the
@@ -26,14 +27,15 @@ import io
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import current_user
 from app.compiler.from_spec import SpecCompileError, compile_spec
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.ingestion.detect import detect
 from app.models.change_spec import (
     STATUS_COMMITTED,
@@ -42,15 +44,10 @@ from app.models.change_spec import (
     ChangeSpecRow,
 )
 from app.models.qa_run import OVERALL_FAIL, OVERALL_PASS, QaRun
-from app.core.identity import Actor
 from app.models.template import Template
-from app.models.template_version import (
-    LIFECYCLE_DRAFT,
-    LIFECYCLE_PUBLISHED,
-    LIFECYCLE_SUPERSEDED,
-    ORIGIN_GENERATED,
-    TemplateVersion,
-)
+from app.models.template_version import APPROVAL_APPROVED, TemplateVersion
+from app.models.user import ROLE_ADMIN, User
+from app.notifications.service import notify_approval_requested
 from app.schemas.change_spec import ChangeSpec
 from app.schemas.generate import CompileRequest, CompileResponse
 from app.storage.s3 import delete_file, download_file, upload_file
@@ -96,6 +93,28 @@ def _fetch(version: TemplateVersion) -> bytes:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
+@router.post("/{template_id}/compile", response_model=CompileResponse)
+def compile_change_spec_endpoint(
+    template_id: uuid.UUID,
+    request: CompileRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> CompileResponse:
+    """Apply a Change Spec. `dry_run` returns the QA verdict and keeps nothing."""
+    template, version = _load(db, template_id, request.version_id)
+    return compile_and_store(
+        db,
+        template,
+        version,
+        request.spec,
+        dry_run=request.dry_run,
+        publish=request.publish,
+        user=user,
+        background_tasks=background_tasks,
+    )
+
+
 def compile_and_store(
     db: Session,
     template: Template,
@@ -104,19 +123,24 @@ def compile_and_store(
     *,
     dry_run: bool,
     publish: bool = False,
+    user: User,
+    background_tasks: BackgroundTasks | None = None,
     session_id: uuid.UUID | None = None,
-    actor: Actor | None = None,
 ) -> CompileResponse:
     """Apply a Change Spec to a stored version. **The only path to bytes.**
 
-    Both the version-addressed endpoint below and the session endpoints in
-    `app/api/v1/sessions.py` come through here, and that is deliberate rather
-    than tidy. This function is what writes `change_specs`, `qa_runs` and the
-    resulting `TemplateVersion`, and it is what enforces QA as a *gate* rather
-    than a report. A second implementation would eventually differ on that last
-    point -- the two paths would drift on which one is allowed to keep bytes
-    that failed structural QA -- and the whole package-integrity claim rests on
-    the answer being "neither, ever".
+    Both the endpoint above and the session endpoints in `app/api/v1/sessions.py`
+    come through here, and that is deliberate rather than tidy. This function is
+    what writes `change_specs`, `qa_runs` and the resulting `TemplateVersion`,
+    and it is what enforces QA as a *gate* rather than a report. A second
+    implementation would eventually differ on that last point -- the two paths
+    would drift on which one is allowed to keep bytes that failed structural QA
+    -- and the whole package-integrity claim rests on the answer being "neither,
+    ever".
+
+    It was briefly inlined into the endpoint while the conversation API lived on
+    another branch, which broke `sessions.py`'s commit. Extracted again rather
+    than duplicated there, for the reason in the paragraph above.
 
     `session_id` is recorded on the spec row when a conversation produced it.
     Null is the honest value for a spec a human or a script wrote directly.
@@ -209,28 +233,22 @@ def compile_and_store(
                 # Carried forward: the document still claims the same `Ver.` in
                 # its own revision block until publish writes back to it.
                 in_doc_version=version.in_doc_version,
-                # A compiled document is a draft until somebody promotes it --
-                # even with `publish: true`, which points the template at it
-                # below and is corrected to `published` there. Defaulting to
-                # `published` here would put every generated file into the
-                # library the moment it compiled, which is the entire thing the
-                # promotion flow exists to prevent.
-                lifecycle=LIFECYCLE_PUBLISHED if publish else LIFECYCLE_DRAFT,
-                origin=ORIGIN_GENERATED,
-                created_by_id=actor.user_id if actor else None,
+                # A compiled version is a new, unreviewed document, so it enters
+                # the queue like any upload. It does *not* inherit the base
+                # version's approval: doing so would make compile-then-publish a
+                # way to change what the library serves without review, which is
+                # the whole thing the gate exists to stop.
+                submitted_by=user.id,
             )
             db.add(result_version)
             db.flush()
             spec_row.result_version_id = result_version.id
             spec_row.status = STATUS_COMMITTED
             if publish:
-                # Whatever was current stops being current. Without this the
-                # history shows two versions claiming `published` and no way to
-                # tell which one the library actually serves.
-                if template.current_version_id:
-                    previous = db.get(TemplateVersion, template.current_version_id)
-                    if previous is not None and previous.id != result_version.id:
-                        previous.lifecycle = LIFECYCLE_SUPERSEDED
+                # Pointing `current_version_id` at a pending version takes the
+                # template out of the library until an admin approves it. That
+                # is deliberate and is what "publish" now means: submit for
+                # publication, not publish.
                 template.current_version_id = result_version.id
         except Exception as exc:  # noqa: BLE001
             db.rollback()
@@ -255,6 +273,19 @@ def compile_and_store(
     )
     db.add(qa_run)
     db.commit()
+
+    # A stored version is a submission, so doc control hears about it the same
+    # way it hears about an upload. After the response, because notifying is an
+    # SMTP round trip per admin and the caller is waiting on a compile result.
+    if result_version is not None and background_tasks is not None:
+        background_tasks.add_task(
+            _announce_compiled_version,
+            template.id,
+            result_version.id,
+            template.title,
+            result_version.version_number,
+            user.id,
+        )
 
     logger.info(
         "compiled spec %s for template %s: %s, %d applied, %d dropped, dry_run=%s",
@@ -296,40 +327,64 @@ def compile_and_store(
     )
 
 
-@router.post("/{template_id}/compile", response_model=CompileResponse)
-def compile_change_spec_endpoint(
+def _announce_compiled_version(
     template_id: uuid.UUID,
-    request: CompileRequest,
-    db: Session = Depends(get_db),
-) -> CompileResponse:
-    """Apply a Change Spec addressed by version. `dry_run` keeps nothing.
+    version_id: uuid.UUID,
+    title: str,
+    version_number: int,
+    submitter_id: uuid.UUID,
+) -> None:
+    """Tell the admins about a compiled version, on its own session.
 
-    The spec here arrives ready-made -- from a script, a test, or a human who
-    hand-wrote it. `POST /sessions/{sid}/compile` is the same operation with the
-    spec built from a conversation instead; both call `compile_and_store`.
+    A background task outlives the request and the `get_db` session that was
+    closed when the response went out, so this opens its own. Failures are
+    logged and swallowed: the version is committed and sitting in the queue
+    whether or not the announcement got out.
     """
-    template, version = _load(db, template_id, request.version_id)
-    return compile_and_store(
-        db,
-        template,
-        version,
-        request.spec,
-        dry_run=request.dry_run,
-        publish=request.publish,
-    )
+    db = SessionLocal()
+    try:
+        notify_approval_requested(
+            db,
+            submitter=db.get(User, submitter_id),
+            template_title=title,
+            template_id=template_id,
+            version_id=version_id,
+            version_number=version_number,
+        )
+    except Exception:
+        logger.exception("Failed to announce compiled version %s for approval", version_id)
+    finally:
+        db.close()
 
 
 @router.get("/{template_id}/versions/{version_id}/download")
 def download_version(
-    template_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+    template_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """Download one specific version's bytes.
 
     The existing `/{template_id}/download` serves whichever version is current;
     a compiled result is deliberately *not* current unless it was published, so
     it needs to be reachable by id or it could not be downloaded at all.
+
+    Addressing a version directly bypasses the "is the *current* version
+    approved" question entirely, so the check is explicit here: an unapproved
+    version's bytes go only to the person who submitted it, the template's
+    owner, and admins. 404 rather than 403 for everyone else, matching
+    `GET /templates/{id}` -- the existence of a colleague's rejected draft is
+    not theirs to learn.
     """
     template, version = _load(db, template_id, version_id)
+    if version.approval_status != APPROVAL_APPROVED and not (
+        user.role == ROLE_ADMIN
+        or template.owner_id == user.id
+        or version.submitted_by == user.id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found.")
+
     try:
         body = download_file(version.storage_key)
     except RuntimeError as exc:

@@ -28,12 +28,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.generate import _fetch, _load, compile_and_store
 from app.compiler.from_spec import value_rejection_reason
-from app.core.identity import CurrentActor
+from app.api.deps import current_user
+from app.models.user import User
 from app.conversation.context import assemble_context
 from app.conversation.deriver import derive_values
 from app.conversation.extractor import extract_answer
@@ -550,7 +551,8 @@ def patch_spec_operation(
 def compile_session(
     session_id: uuid.UUID,
     request: SessionCompileIn,
-    actor: CurrentActor,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> CompileResponse:
     """Compile this session's spec. `dry_run` returns QA and keeps nothing.
@@ -600,9 +602,10 @@ def compile_session(
         dry_run=request.dry_run,
         publish=request.publish,
         session_id=session.id,
-        # So the version this mints can name its author, and a promotion request
-        # raised against it later has somebody to attribute and notify.
-        actor=actor,
+        # The version this mints is a submission like any upload: it names its
+        # author and, once stored, notifies doc control that it needs reviewing.
+        user=user,
+        background_tasks=background_tasks,
     )
 
     if not request.dry_run and response.overall == "pass":
@@ -617,7 +620,8 @@ def compile_session(
 def commit_session(
     session_id: uuid.UUID,
     request: SessionCompileIn,
-    actor: CurrentActor,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> CompileResponse:
     """Compile for real and keep the result as a new version.
@@ -631,7 +635,8 @@ def commit_session(
         SessionCompileIn(
             dry_run=False, publish=request.publish, overrides=request.overrides
         ),
-        actor,
+        background_tasks,
+        user,
         db,
     )
 

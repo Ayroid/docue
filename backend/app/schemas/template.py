@@ -53,6 +53,12 @@ class TemplateOut(BaseModel):
         default=False,
         description="True once the template is embedded and findable by semantic search.",
     )
+    # Review state of the *current version*. Anything the library lists is
+    # 'approved' by construction; the other values are only ever seen by the
+    # submitter looking at their own upload, or by an admin.
+    approval_status: str = "pending"
+    review_note: str | None = None
+    owner_id: uuid.UUID | None = None
     current_version_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
