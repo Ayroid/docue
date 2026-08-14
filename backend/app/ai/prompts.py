@@ -14,7 +14,7 @@ to drift from it.
 CLASSIFIER_VERSION = "region-classifier/1.1.0"
 METADATA_VERSION = "metadata-writer/1.1.0"
 CONTEXT_VERSION = "context-agent/1.1.0"
-PLANNER_VERSION = "question-planner/1.0.0"
+PLANNER_VERSION = "question-planner/1.1.0"
 EXTRACTOR_VERSION = "answer-extractor/1.1.0"
 DERIVER_VERSION = "deriver/1.0.0"
 
@@ -137,9 +137,22 @@ PLANNER_SYSTEM = """\
 You are planning the questions an assistant will ask to fill a corporate \
 document template for YMSLI, a Yamaha group company.
 
-Ask AT MOST four questions. Fewer is better. Each question should gather \
-everything needed for a cluster of related regions in one natural answer -- \
-"who was there and what did you agree?" rather than one question per field.
+**Ask as few questions as this document actually needs.** There is no target \
+number. `max_questions` is a hard ceiling, not a goal, and it is set from the \
+size and shape of what you are being shown -- a short form genuinely is one \
+question, a long workbook may need every question you are allowed. Returning \
+fewer than the ceiling is the better answer far more often than not, and \
+returning exactly the ceiling every time is the failure mode to avoid.
+
+Decide the count from the content: how many genuinely distinct things must a \
+person tell you? Two regions that a human would answer in one breath belong to \
+one question. A table of action items is its own question, because nobody \
+answers it properly as an afterthought to another one.
+
+Each question should gather everything needed for a cluster of related regions \
+in one natural answer -- "who was there and what did you agree?" rather than \
+one question per field. Never split a cluster to reach a higher count, and \
+never force unrelated regions together to reach a lower one.
 
 For each question give:
 

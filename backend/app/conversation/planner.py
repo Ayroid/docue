@@ -28,12 +28,27 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "FALLBACK_PLANNER_VERSION",
+    "QUESTION_CEILING",
     "PlannedQuestion",
     "QuestionPlanResult",
     "plan_questions",
+    "question_budget",
 ]
 
-MAX_QUESTIONS = 4
+# A ceiling, not a target. Whatever the document, an interview longer than this
+# is one nobody finishes -- but most documents should come in well under it, and
+# `question_budget` is what decides.
+QUESTION_CEILING = 8
+
+# Regions that cluster into one natural answer. Four is the observed shape of
+# the corpus: "when and where was it, what for, who wrote it up" is four fields
+# and one question a person answers in a sentence.
+FIELDS_PER_QUESTION = 4
+
+# A table or a block is its own question. "What actions came out of it, who owns
+# each and by when" cannot be folded in beside the venue without producing a
+# question no one answers completely.
+HEAVY_KINDS = frozenset({"table_loop", "table_data", "repeating_block"})
 
 # The structural fallback is cached in `question_plans` exactly like a real
 # plan, so it has to be *labelled* like a different planner. Without this the
@@ -42,28 +57,58 @@ MAX_QUESTIONS = 4
 # nothing to distinguish it and no path back to the model once it recovers.
 FALLBACK_PLANNER_VERSION = f"{PLANNER_VERSION}+structural-fallback"
 
-_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "questions": {
-            "type": "array",
-            "maxItems": MAX_QUESTIONS,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "question_text": {"type": "string"},
-                    "hint": {"type": "string"},
-                    "example": {"type": "string"},
-                    "covers_regions": {"type": "array", "items": {"type": "string"}},
+
+def question_budget(regions: list[Any]) -> int:
+    """How many questions this particular document warrants.
+
+    The cap used to be the constant 4, for every document ever loaded. That is
+    the right number for the MOM and it is visibly wrong either side of it: a
+    three-field form still got four questions, padded out of regions that did
+    not belong together, and a thirty-region workbook got four questions doing
+    the work of eight and answered badly.
+
+    So it is computed from what is actually being asked about -- one question
+    per heavy region, plus one per `FIELDS_PER_QUESTION` light ones, floored at
+    1 and capped at `QUESTION_CEILING`. Deterministic and cheap: the model is
+    handed the number rather than trusted to choose it, because "how long should
+    this interview be" is a budget and budgets are not a judgement call.
+
+    It remains a *ceiling*. The planner is told fewer is better and routinely
+    returns fewer, which is the point -- the old constant was a floor in
+    practice, because a model told "at most four" produces four.
+    """
+    if not regions:
+        return 0
+    heavy = sum(1 for r in regions if r.kind in HEAVY_KINDS)
+    light = len(regions) - heavy
+    budget = heavy + -(-light // FIELDS_PER_QUESTION)  # ceil, no import
+    return max(1, min(budget, QUESTION_CEILING))
+
+
+def _schema(limit: int) -> dict[str, Any]:
+    """Built per call, because `maxItems` is now per document."""
+    return {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "maxItems": limit,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question_text": {"type": "string"},
+                        "hint": {"type": "string"},
+                        "example": {"type": "string"},
+                        "covers_regions": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["question_text", "hint", "example", "covers_regions"],
+                    "additionalProperties": False,
                 },
-                "required": ["question_text", "hint", "example", "covers_regions"],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["questions"],
-    "additionalProperties": False,
-}
+            }
+        },
+        "required": ["questions"],
+        "additionalProperties": False,
+    }
 
 
 @dataclass
@@ -103,6 +148,9 @@ class QuestionPlanResult:
     uncovered: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     planner_version: str = PLANNER_VERSION
+    # What this document was allowed, so a short interview is legible as a
+    # decision rather than as the planner having given up.
+    budget: int = 0
 
     @property
     def ok(self) -> bool:
@@ -151,14 +199,19 @@ def _group_key(region: Any) -> tuple[int, str]:
 
 
 def _fallback(regions: list[Any]) -> list[PlannedQuestion]:
-    """Group structurally, capped at four questions.
+    """Group structurally, capped at this document's own budget.
 
     The wording is mechanical -- "Please provide: Venue, Date, Attendees" -- but
     the coverage is exactly right, and the extractor still parses a free-form
     answer against the cluster, so the experience degrades far less than the
     phrasing suggests. This is plan §12's hour-14 fallback, available from hour
     zero rather than written under pressure at 3am.
+
+    The grouping is structural, so it naturally produces *fewer* questions than
+    the budget for a simple document -- a one-sheet form is one group and one
+    question. The budget only ever binds at the top end.
     """
+    limit = question_budget(regions)
     groups: dict[tuple[int, str], list[Any]] = {}
     for region in regions:
         groups.setdefault(_group_key(region), []).append(region)
@@ -169,10 +222,10 @@ def _fallback(regions: list[Any]) -> list[PlannedQuestion]:
     # More groups than we are allowed questions: the tail is merged into the
     # last one rather than dropped, because an ugly question still collects the
     # value and a dropped region is a blank in the document.
-    if len(ordered) > MAX_QUESTIONS:
-        head = ordered[: MAX_QUESTIONS - 1]
+    if len(ordered) > limit:
+        head = ordered[: limit - 1]
         tail: list[Any] = []
-        for _, members in ordered[MAX_QUESTIONS - 1 :]:
+        for _, members in ordered[limit - 1 :]:
             tail.extend(members)
         ordered = head + [("rest", tail)]
 
@@ -198,10 +251,15 @@ def plan_questions(
     template_meta: dict[str, Any] | None = None,
     intent: str | None = None,
 ) -> QuestionPlanResult:
-    """Plan ≤4 questions over `region_ids`. Never raises.
+    """Plan an interview over `region_ids`, as short as the document allows.
 
     `region_ids` is the context agent's `must_ask` + `inferable`: the regions
     worth a user's attention. Everything else was already settled upstream.
+
+    The number of questions comes from `question_budget` and varies per
+    document. It is a ceiling handed to the model, which is told plainly that
+    fewer is better -- the old fixed 4 was a ceiling in name and a quota in
+    effect.
     """
     result = QuestionPlanResult()
     by_id = {r.region_id: r for r in schema.regions}
@@ -209,8 +267,10 @@ def plan_questions(
     if not regions:
         return result
 
+    limit = question_budget(regions)
+    result.budget = limit
     known_ids = {r.region_id for r in regions}
-    document: dict[str, Any] = {"format": schema.format}
+    document: dict[str, Any] = {"format": schema.format, "max_questions": limit}
     for key in ("title", "purpose"):
         value = (template_meta or {}).get(key)
         if value:
@@ -228,7 +288,7 @@ def plan_questions(
             purpose="plan_questions",
             system=PLANNER_SYSTEM,
             user=user,
-            schema=_SCHEMA,
+            schema=_schema(limit),
             prompt_version=PLANNER_VERSION,
         )
     except BedrockError as exc:
@@ -243,7 +303,7 @@ def plan_questions(
         # The cap counts questions *accepted*, not entries offered. Slicing the
         # payload first meant four malformed entries could exhaust the budget
         # and discard a fifth good one, taking the whole plan to the fallback.
-        if len(result.questions) >= MAX_QUESTIONS:
+        if len(result.questions) >= limit:
             break
         # Bedrock's forced-tool validation does not reliably enforce nested item
         # shape -- this exact schema has returned an array of bare strings. See

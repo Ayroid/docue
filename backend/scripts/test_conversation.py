@@ -35,7 +35,11 @@ from _artifact import write_artifact  # noqa: E402
 
 from app.compiler.from_spec import compile_spec  # noqa: E402
 from app.conversation.context import _askable  # noqa: E402
-from app.conversation.planner import _fallback  # noqa: E402
+from app.conversation.planner import (  # noqa: E402
+    QUESTION_CEILING,
+    _fallback,
+    question_budget,
+)
 from app.conversation.values import region_columns  # noqa: E402
 from app.ingestion.detect import detect  # noqa: E402
 from app.planning.change_planner import plan_change_spec  # noqa: E402
@@ -98,7 +102,18 @@ def _check_format(filename: str, fmt: str, artifact: str) -> None:
 
     questions = _fallback(askable)
     assert questions, f"{fmt}: the fallback planner produced no question"
-    assert len(questions) <= 4, f"{fmt}: {len(questions)} questions, plan §10 caps it at 4"
+
+    # Against this document's own budget, not a constant 4. Plan §10's "four
+    # questions" was the MOM's number read as a universal law: it padded a
+    # four-region form and squeezed a 38-region BRD into the same interview.
+    # `question_budget` derives it from the regions instead, so a deck of five
+    # distinct slides is allowed the questions it needs and a short form is not
+    # asked four times about three fields.
+    budget = question_budget(askable)
+    assert len(questions) <= budget, (
+        f"{fmt}: {len(questions)} questions exceeds this document's budget of {budget}"
+    )
+    assert budget <= QUESTION_CEILING, f"{fmt}: budget {budget} is above the ceiling"
 
     covered = [rid for q in questions for rid in q.covers_regions]
     assert len(covered) == len(set(covered)), f"{fmt}: a region is covered by two questions"

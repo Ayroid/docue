@@ -84,9 +84,20 @@ router = APIRouter(prefix="/sessions", tags=["generation"])
 # ── loading ───────────────────────────────────────────────────────────────
 
 
-def _session(db: Session, session_id: uuid.UUID) -> GenerationSession:
+def _session(db: Session, session_id: uuid.UUID, user: User) -> GenerationSession:
+    """This caller's session, or 404.
+
+    Someone else's session is **404, not 403**, matching `documents.py`: a 403
+    confirms the id exists, which is a fact a stranger has no business learning
+    by guessing.
+
+    Every route reaches a session through here, so the ownership check is
+    written once. It was written nowhere before -- `user_id` was on the model
+    but never set, and every route loaded by id alone, so any caller who knew
+    or guessed a session id could read its answers and edit its spec.
+    """
     session = db.get(GenerationSession, session_id)
-    if session is None:
+    if session is None or session.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
     return session
 
@@ -218,7 +229,9 @@ def _session_out(
 
 @router.post("", response_model=SessionCreateOut, status_code=status.HTTP_201_CREATED)
 def start_session(
-    request: SessionCreate, db: Session = Depends(get_db)
+    request: SessionCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> SessionCreateOut:
     """Triage the document and plan the questions. Plan §10 ③ then ④.
 
@@ -264,6 +277,7 @@ def start_session(
         id=uuid.uuid4(),
         template_id=template.id,
         base_version_id=version.id,
+        user_id=user.id,
         tier=request.tier,
         user_intent=request.intent,
         status=STATUS_ACTIVE,
@@ -349,7 +363,10 @@ def _read_message(
 
 @router.post("/{session_id}/answer", response_model=AnswerOut)
 def answer(
-    session_id: uuid.UUID, request: AnswerIn, db: Session = Depends(get_db)
+    session_id: uuid.UUID,
+    request: AnswerIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> AnswerOut:
     """Extract one answer. Runs the deriver only when it was the last question.
 
@@ -357,7 +374,7 @@ def answer(
     the regions it covered stay untouched and *visible* on the review screen,
     rather than being quietly filled with something plausible.
     """
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     if session.status not in (STATUS_ACTIVE,):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -461,7 +478,10 @@ def answer(
 
 @router.post("/{session_id}/instruct", response_model=AnswerOut)
 def instruct(
-    session_id: uuid.UUID, request: InstructionIn, db: Session = Depends(get_db)
+    session_id: uuid.UUID,
+    request: InstructionIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> AnswerOut:
     """Apply a free-form edit to the document. Answers no question.
 
@@ -488,7 +508,7 @@ def instruct(
     The deriver deliberately does not re-run: it fills what is empty, and an
     instruction is a statement about a region the user is already thinking about.
     """
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     if session.status != STATUS_ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -549,9 +569,13 @@ def instruct(
 
 
 @router.get("/{session_id}", response_model=SessionOut)
-def get_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SessionOut:
+def get_session(
+    session_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SessionOut:
     """Full state, enough to rebuild the chat screen after a reload."""
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     template, version, schema = _context_for(db, session)
     return _session_out(session, template, load_question_plan(db, version.id), schema)
 
@@ -587,7 +611,11 @@ def _build_spec(
 
 
 @router.get("/{session_id}/spec", response_model=SpecOut)
-def get_spec(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SpecOut:
+def get_spec(
+    session_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SpecOut:
     """The Change Specification this session would compile.
 
     Built on demand rather than stored: it is a pure function of the session's
@@ -595,7 +623,7 @@ def get_spec(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SpecOut:
     The stored copy is written by `compile_and_store`, at the moment it is
     actually applied to bytes -- which is the version worth auditing.
     """
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     _, _, schema = _context_for(db, session)
     planned = _build_spec(db, session, schema)
     return SpecOut(
@@ -613,6 +641,7 @@ def patch_spec_operation(
     session_id: uuid.UUID,
     op_index: int,
     request: SpecOperationPatch,
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> SpecOut:
     """Edit one operation's value from the review screen.
@@ -625,7 +654,7 @@ def patch_spec_operation(
     offered here -- that is precisely what the injection barrier exists to stop,
     and a review screen is not a reason to open a second door to it.
     """
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     _, _, schema = _context_for(db, session)
     planned = _build_spec(db, session, schema)
 
@@ -724,7 +753,7 @@ def compile_session(
     contradicted itself. Every dry run is already on `qa_runs` with
     `dry_run=true`, which is the better record of it anyway.
     """
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     if session.status == STATUS_ABANDONED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -804,10 +833,14 @@ def commit_session(
 
 
 @router.post("/{session_id}/abandon", response_model=SessionOut)
-def abandon_session(session_id: uuid.UUID, db: Session = Depends(get_db)) -> SessionOut:
+def abandon_session(
+    session_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SessionOut:
     """Walk away. The session is kept, not deleted -- an abandoned interview is
     evidence about the question plan, and deleting it would throw that away."""
-    session = _session(db, session_id)
+    session = _session(db, session_id, user)
     session.status = STATUS_ABANDONED
     session.completed_at = datetime.now(timezone.utc)
     db.commit()

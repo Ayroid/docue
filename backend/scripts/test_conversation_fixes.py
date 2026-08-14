@@ -29,8 +29,9 @@ from app.ai.bedrock import BedrockError  # noqa: E402
 from app.conversation.deriver import derive_values  # noqa: E402
 from app.conversation.planner import (  # noqa: E402
     FALLBACK_PLANNER_VERSION,
-    MAX_QUESTIONS,
+    QUESTION_CEILING,
     plan_questions,
+    question_budget,
 )
 from app.conversation.values import parse_entries, region_columns  # noqa: E402
 from app.ingestion.detect import detect  # noqa: E402
@@ -102,7 +103,7 @@ def _cap_counts_accepted(schema, ids) -> None:
                 {"question_text": "?", "covers_regions": ["no.such.region"]},
                 {"covers_regions": [ids[1]]},  # no question_text
             ]
-            # ...then a good one, which the old `[:MAX_QUESTIONS]` slice cut off.
+            # ...then a good one, which the old `[:limit]` slice cut off.
             + [{"question_text": good_text, "covers_regions": [ids[0]]}]
         )
     }
@@ -114,10 +115,51 @@ def _cap_counts_accepted(schema, ids) -> None:
     )
     texts = [q.question_text for q in result.questions]
     assert good_text in texts, f"the one valid question was dropped; kept {texts}"
-    assert len(result.questions) <= MAX_QUESTIONS, (
-        f"{len(result.questions)} questions exceeds the cap of {MAX_QUESTIONS}"
+    budget = question_budget([r for r in schema.regions if r.region_id in set(ids)])
+    assert len(result.questions) <= budget, (
+        f"{len(result.questions)} questions exceeds this document's budget of {budget}"
     )
-    ok("the cap counts accepted questions", f"kept {texts}")
+    assert budget <= QUESTION_CEILING, f"budget {budget} is above the ceiling"
+    ok("the cap counts accepted questions", f"kept {texts}, budget {budget}")
+
+
+def _budget_follows_the_document(schema, regions) -> None:
+    """The interview length must come from the document, not from a constant.
+
+    It was `MAX_QUESTIONS = 4` for every document ever loaded, which is right
+    for the MOM and wrong either side of it. These assertions are about the
+    *shape* of the function rather than its exact output, so tuning
+    `FIELDS_PER_QUESTION` does not break them -- what must not come back is a
+    budget that ignores its input.
+    """
+
+    class R:
+        def __init__(self, kind):
+            self.kind = kind
+
+    assert question_budget([]) == 0, "no regions must mean no questions"
+    assert question_budget([R("field")]) == 1, "one field must be one question"
+
+    small = question_budget([R("field")] * 2)
+    large = question_budget([R("field")] * 40)
+    assert small < large, (
+        f"a 2-field form and a 40-field workbook both got {small} questions -- "
+        "the budget is not reading the document"
+    )
+    assert large <= QUESTION_CEILING, f"{large} is above the ceiling {QUESTION_CEILING}"
+
+    # A table is its own question; folding it in beside three fields is how you
+    # get an action-item list answered as an afterthought.
+    assert question_budget([R("field")] * 3 + [R("table_loop")]) > question_budget(
+        [R("field")] * 3
+    ), "adding a table did not buy a question"
+
+    real = question_budget(regions)
+    assert 1 <= real <= QUESTION_CEILING, f"this document's budget is {real}"
+    ok(
+        "the question budget follows the document",
+        f"2 fields -> {small}, 40 fields -> {large}, this document -> {real}",
+    )
 
 
 def _duplicate_entry_keeps_its_own_basis(schema, ids) -> None:
@@ -242,6 +284,7 @@ def main() -> int:
     print("Planner:")
     _fallback_is_labelled(schema, ids)
     _cap_counts_accepted(schema, ids)
+    _budget_follows_the_document(schema, regions)
 
     print("\nDeriver:")
     _duplicate_entry_keeps_its_own_basis(schema, ids)
