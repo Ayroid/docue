@@ -23,7 +23,12 @@ class UserOut(BaseModel):
 
 class RegisterIn(BaseModel):
     email: EmailStr
-    username: str = Field(min_length=3, max_length=64)
+    # Optional: omit it and one is derived from the email address. The length
+    # and character rules are deliberately *not* declared here -- they live in
+    # `security.username_problem`, which explains which rule was broken and
+    # why. Pydantic's own "String should have at least 3 characters" would
+    # otherwise win the race and say less.
+    username: str | None = None
     password: str = Field(min_length=8)
     full_name: str | None = Field(default=None, max_length=160)
 

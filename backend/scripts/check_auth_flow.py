@@ -44,6 +44,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import text  # noqa: E402
 
+from app.db.session import SessionLocal  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Standard library rather than httpx/requests, for the reason given in
@@ -291,6 +293,29 @@ def main() -> int:
 
         status, _ = _post(f"{api}/auth/login", {"identifier": member_email, "password": PASSWORD})
         check("unverified account cannot sign in", status == 403, f"got {status}")
+
+        # Registering with no username at all: the server derives one from the
+        # email rather than refusing. This is the path the form takes when the
+        # field is left empty, and the one that used to be impossible.
+        derived_email = f"derived.{tag}@authcheck.local"
+        status, body = _post(f"{api}/auth/register", {"email": derived_email, "password": PASSWORD})
+        check("registering without a username is accepted", status == 202, f"got {status} {body}")
+        if status == 202:
+            db = SessionLocal()
+            try:
+                row = db.execute(
+                    text("select id, username from users where email = :e"), {"e": derived_email}
+                ).one_or_none()
+            finally:
+                db.close()
+            if row is not None:
+                user_ids.append(row[0])
+                check("the derived username is the email's local part", row[1] == f"derived.{tag}", str(row[1]))
+
+        status, _ = _post(f"{api}/auth/register", {
+            "email": f"bad.{tag}@authcheck.local", "username": "has spaces", "password": PASSWORD,
+        })
+        check("a username with a space is refused", status == 422, f"got {status}")
 
         status, _ = _post(f"{api}/auth/verify-email", {"email": member_email, "code": "000000" if code != "000000" else "111111"})
         check("a wrong OTP is rejected", status == 400, f"got {status}")

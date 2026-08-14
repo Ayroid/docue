@@ -27,7 +27,16 @@ MAX_PASSWORD_BYTES = 72
 # The only rule, and the only one worth having -- see `password_problem`.
 MIN_PASSWORD_LENGTH = 8
 
-USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,64}$")
+MIN_USERNAME_LENGTH = 3
+MAX_USERNAME_LENGTH = 64
+
+# Letters, digits, dot, dash, underscore. **`@` is deliberately excluded**, and
+# that is a correctness constraint rather than tidiness: `/auth/login` takes one
+# `identifier` and resolves it against the email *or* the username, so a
+# username containing `@` could equal somebody else's email address and two
+# accounts would answer to one login string. Keeping the two character sets
+# disjoint is what makes that lookup unambiguous.
+USERNAME_ALLOWED_RE = re.compile(r"^[a-z0-9._-]+$")
 
 
 # ── passwords ─────────────────────────────────────────────────────────────
@@ -89,9 +98,48 @@ def normalize_username(username: str) -> str:
 
 
 def username_problem(username: str) -> str | None:
-    if not USERNAME_RE.match(username.strip()):
-        return "Username must be 3-64 characters, using letters, digits, dot, dash or underscore."
+    """The reason this username is unusable, or None if it is fine.
+
+    One message per distinct problem, naming the offending characters. The
+    single combined sentence this replaced ("must be 3-64 characters, using
+    letters, digits, dot, dash or underscore") was accurate and useless: the two
+    inputs people actually type here are their email address and their full
+    name, and neither reader could tell from that sentence which half they had
+    broken -- the length or the character set.
+    """
+    candidate = normalize_username(username)
+
+    if len(candidate) < MIN_USERNAME_LENGTH:
+        return f"Username must be at least {MIN_USERNAME_LENGTH} characters."
+    if len(candidate) > MAX_USERNAME_LENGTH:
+        return f"Username must be at most {MAX_USERNAME_LENGTH} characters."
+
+    if not USERNAME_ALLOWED_RE.match(candidate):
+        bad = sorted({character for character in candidate if not USERNAME_ALLOWED_RE.match(character)})
+        shown = ", ".join("a space" if character == " " else f"'{character}'" for character in bad)
+        if "@" in bad:
+            return (
+                f"Username cannot contain {shown}. Use your name rather than your "
+                "email address -- you can sign in with either."
+            )
+        return f"Username cannot contain {shown}. Use letters, digits, dot, dash or underscore."
     return None
+
+
+def suggest_username(email: str) -> str:
+    """A usable username derived from an email address.
+
+    Used to prefill the field so the common path needs no thought. Everything
+    outside the allowed set collapses to a dot rather than being dropped, so
+    `riya mehta@ymsli.com` suggests `riya.mehta` instead of `riyamehta` -- the
+    word boundary is information and silently deleting it makes the suggestion
+    harder to read than the name it came from.
+    """
+    local = normalize_email(email).split("@", 1)[0]
+    collapsed = re.sub(r"[^a-z0-9._-]+", ".", local).strip("._-")
+    # Runs of separators read as a typo in a prefilled field.
+    collapsed = re.sub(r"\.{2,}", ".", collapsed)
+    return collapsed[:MAX_USERNAME_LENGTH]
 
 
 # ── one-time codes ────────────────────────────────────────────────────────

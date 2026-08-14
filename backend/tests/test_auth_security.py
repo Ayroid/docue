@@ -28,6 +28,7 @@ from app.core.security import (
     normalize_email,
     normalize_username,
     password_problem,
+    suggest_username,
     username_problem,
     verify_otp,
     verify_password,
@@ -116,6 +117,7 @@ def test_email_normalisation_is_what_makes_the_unique_index_work():
     [
         ("riya.mehta", True),
         ("riya_mehta-1", True),
+        ("RIYA.MEHTA", True),  # normalised to lower case before checking
         ("ab", False),  # too short
         ("has spaces", False),
         ("has@symbol", False),
@@ -124,6 +126,49 @@ def test_email_normalisation_is_what_makes_the_unique_index_work():
 )
 def test_username_policy(username, ok):
     assert (username_problem(username) is None) is ok
+
+
+def test_username_messages_name_the_actual_problem():
+    """The one combined sentence this replaced could not tell a reader which
+    half they had broken, and the two inputs people type here -- their email
+    and their full name -- break different halves."""
+    assert "at least 3" in username_problem("ab")
+    assert "at most 64" in username_problem("x" * 65)
+
+    space = username_problem("Jayant Sharma")
+    assert "a space" in space and "'@'" not in space
+
+    at_sign = username_problem("jayant@ymsli.com")
+    # The `@` case gets its own advice, because "use letters, digits, dot,
+    # dash or underscore" does not tell someone who typed their email address
+    # what to do instead.
+    assert "'@'" in at_sign and "sign in with either" in at_sign
+
+    assert "'+'" in username_problem("jayant+hub")
+
+
+@pytest.mark.parametrize(
+    "email,expected",
+    [
+        ("jayants@yamaha-motor-india.com", "jayants"),
+        ("R.Mehta@YMSLI.com", "r.mehta"),
+        # Collapsed to a dot rather than dropped -- the word boundary is
+        # information, and `riyamehta` is harder to read than what was typed.
+        ("riya mehta@ymsli.com", "riya.mehta"),
+        ("_weird_.@x.com", "weird"),
+    ],
+)
+def test_suggest_username(email, expected):
+    assert suggest_username(email) == expected
+
+
+def test_a_suggested_username_is_always_valid_or_padded_by_the_route():
+    """`suggest_username` can return something too short -- `jd@ymsli.com` gives
+    two characters. It is not this function's job to invent length, so it
+    doesn't; `auth._available_username` pads it, and this records the seam so
+    the two are not both assumed to be handling it."""
+    assert suggest_username("jd@ymsli.com") == "jd"
+    assert username_problem("jd") is not None
 
 
 # ── one-time codes ────────────────────────────────────────────────────────

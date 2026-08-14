@@ -14,6 +14,7 @@ reset endpoint to take the account over.
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,11 +25,13 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.otp import OtpError, issue_otp, redeem_otp
 from app.core.security import (
+    MIN_USERNAME_LENGTH,
     create_access_token,
     hash_password,
     normalize_email,
     normalize_username,
     password_problem,
+    suggest_username,
     username_problem,
     verify_password,
 )
@@ -69,6 +72,33 @@ def _find_user_by_email(db: Session, email: str) -> User | None:
     return db.query(User).filter(User.email == normalize_email(email)).one_or_none()
 
 
+def _available_username(db: Session, base: str) -> str:
+    """`base`, or `base-2`, `base-3`... -- whichever is free.
+
+    Two people can legitimately derive the same handle: `r.mehta@ymsli.com` and
+    `r.mehta@partner.com` share a local part. Since nobody typed this, a 409 for
+    a field the caller never filled in would be baffling, so it is resolved
+    rather than reported.
+
+    Falls back to a random suffix rather than looping forever -- a hundred
+    collisions on one handle means something is wrong that a longer loop will
+    not fix.
+    """
+    # `suggest_username` can return something too short ("jd@ymsli.com" gives
+    # "jd"), and a derived username still has to satisfy the same rules.
+    base = base or "user"
+    if len(base) < MIN_USERNAME_LENGTH:
+        base = f"{base}.user"
+
+    if db.query(User.id).filter(User.username == base).first() is None:
+        return base
+    for suffix in range(2, 100):
+        candidate = f"{base}-{suffix}"
+        if db.query(User.id).filter(User.username == candidate).first() is None:
+            return candidate
+    return f"{base}-{uuid.uuid4().hex[:8]}"
+
+
 def _otp_response(message: str, email: str, code: str, expires_at, sent: bool) -> OtpSentOut:
     return OtpSentOut(
         message=message,
@@ -99,10 +129,17 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)) -> OtpSentOut:
     returns -- the caller's next step is `/verify-email`.
     """
     email = normalize_email(payload.email)
-    username = normalize_username(payload.username)
 
-    if (problem := username_problem(username)) is not None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem)
+    if payload.username and payload.username.strip():
+        username = normalize_username(payload.username)
+        if (problem := username_problem(username)) is not None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem)
+    else:
+        # Nothing supplied, so one is derived and made unique. This branch must
+        # not be able to fail: the caller did not choose a username, so handing
+        # them an error about one would be about a field they never filled in.
+        username = _available_username(db, suggest_username(email))
+
     if (problem := password_problem(payload.password)) is not None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem)
 
@@ -241,16 +278,15 @@ def login(payload: LoginIn, db: Session = Depends(get_db)) -> TokenOut:
     the account oracle the generic error message is there to prevent.
     """
     identifier = payload.identifier.strip()
-    user = (
-        db.query(User)
-        .filter(
-            or_(
-                User.email == normalize_email(identifier),
-                User.username == normalize_username(identifier),
-            )
-        )
-        .one_or_none()
-    )
+    # Email first, then username, as two lookups rather than one `or_` with
+    # `.one_or_none()`. That form raises `MultipleResultsFound` -- a 500 on the
+    # sign-in route -- the moment one string matches two rows. Today it cannot,
+    # because usernames may not contain `@` and every email must; but the whole
+    # security of that argument rests on a character-class rule three files
+    # away, and a 500 on login is too sharp an edge to leave resting on it.
+    user = db.query(User).filter(User.email == normalize_email(identifier)).first()
+    if user is None:
+        user = db.query(User).filter(User.username == normalize_username(identifier)).first()
 
     if user is None:
         verify_password(payload.password, hash_password("timing-equaliser"))
