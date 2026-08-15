@@ -39,9 +39,29 @@ You need Docker, [uv](https://docs.astral.sh/uv/), Node, and an
 OpenAI-compatible LLM endpoint.
 
 ```bash
+cp backend/.env.example backend/.env   # fill in LLM_API_KEY and JWT_SECRET
+./dev.sh
+```
+
+That is the whole thing. `dev.sh` starts Postgres and MinIO, waits for both to
+report healthy, syncs dependencies, applies migrations, seeds the first
+administrator if the database is empty, and runs the API and the interface
+together with their logs interleaved. Ctrl-C stops both. It is safe to re-run.
+
+| Command | Does |
+|---|---|
+| `./dev.sh` | Everything — services, API, interface |
+| `./dev.sh backend` | Services and API only |
+| `./dev.sh frontend` | Interface only, against an API you started elsewhere |
+| `./dev.sh stop` | Stop the containers, keep the data |
+| `./dev.sh reset` | Destroy the database and rebuild it, after confirming |
+
+<details>
+<summary>Running the steps by hand instead</summary>
+
+```bash
 # 1. Services and API
 cd backend
-cp .env.example .env          # fill in DATABASE_URL, LLM_API_KEY, JWT_SECRET
 docker compose up -d          # Postgres (pgvector) + MinIO
 uv sync
 uv run alembic upgrade head
@@ -53,6 +73,7 @@ cd frontend
 npm install
 npm run dev
 ```
+</details>
 
 | Service | URL |
 |---|---|
