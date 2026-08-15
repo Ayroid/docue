@@ -36,10 +36,14 @@ from app.conversation.scope import (  # noqa: E402
     askable_ids,
     is_user_directed,
 )
+from app.conversation.planner import PlannedQuestion  # noqa: E402
 from app.conversation.state import (  # noqa: E402
     TURN_ANSWER,
     TURN_INSTRUCTION,
+    TURN_PREFILL,
     answered_count,
+    freeze_ask_plan,
+    session_questions,
 )
 from app.ingestion.detect import detect  # noqa: E402
 
@@ -205,6 +209,80 @@ def _unplaceable_input_is_visible(schema, ids) -> None:
     ok("input that lands nowhere produces no phantom chips")
 
 
+def _ask_plan_narrows_but_never_drops(schema, ids) -> None:
+    """Pasted notes shrink a question's cluster; they never delete the question.
+
+    Dropping a fully-supplied question is the shorter interview and the wrong
+    trade. The question that covers a region is the only place a mis-extraction
+    becomes visible, so removing it deletes exactly the audit that would have
+    caught it -- and there is no way to clear a filled value once it is in.
+    """
+    questions = [
+        PlannedQuestion(question_no=1, question_text="Where and when?", covers_regions=ids[:2]),
+        PlannedQuestion(question_no=2, question_text="Who was there?", covers_regions=ids[2:4]),
+    ]
+    frozen = freeze_ask_plan(questions, {ids[0], ids[2], ids[3]})
+    rows = frozen["ask_plan"]
+
+    assert len(rows) == 2, (
+        f"a question was dropped; {len(rows)} of 2 survived. A fully-supplied "
+        "question must still be shown so the user can check what was read."
+    )
+    assert rows[0]["covers_regions"] == [ids[1]], f"q1 not narrowed: {rows[0]}"
+    assert rows[0]["prefilled_regions"] == [ids[0]], f"q1 lost its prefill echo: {rows[0]}"
+    assert rows[1]["covers_regions"] == [], "q2 was fully supplied and should cover nothing"
+    assert sorted(rows[1]["prefilled_regions"]) == sorted(ids[2:4]), f"q2: {rows[1]}"
+    ok(
+        "notes narrow a question without deleting it",
+        f"q1 covers {rows[0]['covers_regions']}, q2 covers nothing but shows 2",
+    )
+
+
+def _frozen_plan_survives_a_replanned_version() -> None:
+    """An in-flight interview must not be renumbered by somebody else's session.
+
+    `save_question_plan` replaces a version's rows wholesale, and `POST
+    /sessions` triggers exactly that whenever the cached plan is a structural
+    fallback. Freezing indices would let the second session shorten the first
+    one's list under a positional pointer; freezing payloads cannot.
+    """
+    session = _FakeSession([])
+    session.known_context = freeze_ask_plan(
+        [
+            PlannedQuestion(question_no=1, question_text="Original one", covers_regions=["a"]),
+            PlannedQuestion(question_no=2, question_text="Original two", covers_regions=["b"]),
+        ],
+        set(),
+    )
+    session.base_version_id = "irrelevant"
+
+    class _ExplodingDb:
+        """The frozen path must not touch the database at all."""
+
+        def execute(self, *a, **k):
+            raise AssertionError("session_questions hit the DB despite a frozen plan")
+
+    got = session_questions(session, _ExplodingDb())
+    assert [q.question_text for q in got] == ["Original one", "Original two"], got
+    assert [q.question_no for q in got] == [1, 2], "numbering drifted"
+    ok("a frozen plan is read without touching the version cache", f"{len(got)} questions")
+
+
+def _prefill_turn_does_not_advance_the_interview() -> None:
+    """Pasting notes must not consume question 1."""
+    turns = [
+        {"kind": TURN_PREFILL, "question_id": ""},
+        {"kind": TURN_ANSWER, "question_id": "q1"},
+        {"kind": TURN_INSTRUCTION, "question_id": ""},
+    ]
+    count = answered_count(_FakeSession(turns))
+    assert count == 1, (
+        f"answered_count is {count} over 3 turns; the pasted notes consumed a "
+        "question the user was never shown"
+    )
+    ok("pasted notes do not advance the question pointer", "1 answer of 3 turns")
+
+
 def main() -> int:
     if not SOURCE.exists():
         print(f"SKIP: corpus file not on this machine: {SOURCE.name}")
@@ -225,6 +303,11 @@ def main() -> int:
 
     print("\nState:")
     _instruction_does_not_advance_the_interview()
+    _prefill_turn_does_not_advance_the_interview()
+
+    print("\nPasted notes:")
+    _ask_plan_narrows_but_never_drops(schema, ids)
+    _frozen_plan_survives_a_replanned_version()
 
     print(f"\nOK - {len(passed)} checks passed.")
     return 0

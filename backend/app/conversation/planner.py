@@ -125,6 +125,14 @@ class PlannedQuestion:
     hint: str | None = None
     example: str | None = None
     covers_regions: list[str] = field(default_factory=list)
+    # Regions this question was planned for that a user's pasted notes already
+    # supplied. They are removed from `covers_regions` -- the question is now
+    # only about the rest -- but kept here so the screen can say "already have:
+    # Venue, Date" rather than appearing to ask again for what was just given.
+    #
+    # Never written by the planner. It is per-session, filled in by
+    # `state.freeze_ask_plan`, and empty on every cached plan.
+    prefilled_regions: list[str] = field(default_factory=list)
 
     @property
     def question_id(self) -> str:
@@ -138,6 +146,7 @@ class PlannedQuestion:
             "hint": self.hint,
             "example": self.example,
             "covers_regions": list(self.covers_regions),
+            "prefilled_regions": list(self.prefilled_regions),
         }
 
 

@@ -160,8 +160,17 @@ def extract_answer(
     also_regions: list[str] | None = None,
     question_text: str | None = None,
     today: date | None = None,
+    max_tokens: int | None = None,
 ) -> ExtractionResult:
     """Pull values out of `answer`. Never raises.
+
+    `max_tokens` raises the reply budget for a message that supplies a lot at
+    once -- a pasted page of notes filling thirty regions and a table. It is
+    worth passing, because **truncation here is total, not partial**:
+    `complete_json` raises when Bedrock stops at `max_tokens`, and this function
+    turns that into an empty result. There is no half-read. A caller that hands
+    over a long document and leaves the default is asking for all-or-nothing on
+    a budget sized for one sentence.
 
     `covers_regions` is what the question asked about; `also_regions` is the
     rest of the document the user is allowed to reach. Values for the first land
@@ -223,6 +232,7 @@ def extract_answer(
             user=user,
             schema=value_entry_schema([r.region_id for r in regions]),
             prompt_version=EXTRACTOR_VERSION,
+            **({"max_tokens": max_tokens} if max_tokens else {}),
         )
     except BedrockError as exc:
         logger.warning("answer extraction failed; keeping the raw turn: %s", exc)
