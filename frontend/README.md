@@ -5,7 +5,8 @@ hackathon. Users search a library of templates by meaning, answer a short
 interview about the one they picked, and get back a filled document with the
 original's formatting intact.
 
-The API lives in a separate repository: [Docue-Backend](https://github.com/Ayroid/Docue-Backend).
+The API it talks to lives alongside it in [`backend/`](../backend). Run both: see
+the [root README](../README.md).
 
 ---
 

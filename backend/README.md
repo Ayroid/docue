@@ -5,7 +5,8 @@ hackathon. It ingests office documents, works out which parts of them are
 variable, interviews a user to fill those parts in, and compiles a new document
 that keeps the original's formatting intact.
 
-The frontend lives in a separate repository: [Docue-Frontend](https://github.com/Ayroid/Docue-Frontend).
+The React interface it serves lives alongside it in [`frontend/`](../frontend). Run
+both: see the [root README](../README.md).
 
 ---
 
