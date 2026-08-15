@@ -40,7 +40,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from app.api.v1.generate import _fetch, _load, compile_and_store
+from app.access.templates import assert_can_view_version, load_viewable
+from app.api.v1.generate import _fetch, compile_and_store
 from app.compiler.from_spec import value_rejection_reason
 from app.api.deps import current_user
 from app.models.user import User
@@ -133,6 +134,12 @@ def _session(db: Session, session_id: uuid.UUID, user: User) -> GenerationSessio
     written once. It was written nowhere before -- `user_id` was on the model
     but never set, and every route loaded by id alone, so any caller who knew
     or guessed a session id could read its answers and edit its spec.
+
+    Sessions written before that column was populated have `user_id IS NULL`
+    and are therefore reachable by nobody, admins included -- `None != user.id`
+    for every caller. That is the right answer rather than an oversight: there
+    is no correct person to hand a pre-auth interview to, and an interrupted one
+    costs nothing to restart.
     """
     session = db.get(GenerationSession, session_id)
     if session is None or session.user_id != user.id:
@@ -141,9 +148,16 @@ def _session(db: Session, session_id: uuid.UUID, user: User) -> GenerationSessio
 
 
 def _context_for(
-    db: Session, session: GenerationSession
+    db: Session, session: GenerationSession, user: User
 ) -> tuple[Template, TemplateVersion, Any]:
-    """The template, its version, and a freshly detected schema of the stored bytes."""
+    """The template, its version, and a freshly detected schema of the stored bytes.
+
+    Access to the template is re-checked on every call rather than trusted from
+    the fact that a session exists over it. Owning a session is not a standing
+    right to the document: this is the seam where a template restricted after
+    the session started stops answering, and re-asking costs one row already in
+    memory.
+    """
     template = db.get(Template, session.template_id)
     version = db.get(TemplateVersion, session.base_version_id)
     if template is None or version is None:
@@ -151,6 +165,7 @@ def _context_for(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The template or version this session was started from no longer exists.",
         )
+    assert_can_view_version(db, user, template, version)
     return template, version, detect(_fetch(version), template.format)
 
 
@@ -365,18 +380,21 @@ def start_session(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> SessionCreateOut:
-    """Triage the document, read any pasted notes, and plan the questions.
+    """Triage the document and plan the questions. Plan §10 ③ then ④.
 
-    Plan §10 ③ then ④, with a reading pass in front of them when the caller
-    brought `notes`.
+    Both stages degrade rather than fail: with Bedrock unreachable every
+    editable region lands in `must_ask` and the planner falls back to its
+    structural grouping, which is a longer interview over the same regions.
 
-    Every stage degrades rather than fails: with Bedrock unreachable every
-    editable region lands in `must_ask`, the planner falls back to its
-    structural grouping, and the notes go unread but are kept verbatim on the
-    transcript. The result is a longer interview over the same regions, never an
-    error and never a silently empty document.
+    **This route now requires a caller, and records them.** It took an
+    unauthenticated `template_id` and fetched that template's stored bytes to
+    detect regions over, which made it the widest read path in the API: every
+    unapproved upload in the database was one guessed UUID away from being
+    parsed and described back to anonymous callers. `user_id` on the session
+    stops being the null the model was forced to default it to, which is what
+    lets every route below it check whose session it is.
     """
-    template, version = _load(db, request.template_id, request.version_id)
+    template, version = load_viewable(db, request.template_id, request.version_id, user=user)
     schema = detect(_fetch(version), template.format)
     meta = _template_meta(template)
 
@@ -590,8 +608,8 @@ def answer(
             detail=f"This session is {session.status} and no longer takes answers.",
         )
 
-    template, version, schema = _context_for(db, session)
-    questions = session_questions(session, db)
+    template, version, schema = _context_for(db, session, user)
+    questions = load_question_plan(db, version.id)
     current = _current(session, questions)
     if current is None:
         raise HTTPException(
@@ -737,8 +755,8 @@ def instruct(
             detail="An instruction cannot be empty.",
         )
 
-    template, version, schema = _context_for(db, session)
-    questions = session_questions(session, db)
+    template, version, schema = _context_for(db, session, user)
+    questions = load_question_plan(db, version.id)
 
     # No asked cluster: every addressable region is equally in play, which is
     # what "obey the instruction" means when nothing was asked.
@@ -912,8 +930,8 @@ def get_session(
 ) -> SessionOut:
     """Full state, enough to rebuild the chat screen after a reload."""
     session = _session(db, session_id, user)
-    template, version, schema = _context_for(db, session)
-    return _session_out(session, template, session_questions(session, db), schema)
+    template, version, schema = _context_for(db, session, user)
+    return _session_out(session, template, load_question_plan(db, version.id), schema)
 
 
 def _build_spec(
@@ -1033,7 +1051,7 @@ def get_spec(
     actually applied to bytes -- which is the version worth auditing.
     """
     session = _session(db, session_id, user)
-    _, _, schema = _context_for(db, session)
+    _, _, schema = _context_for(db, session, user)
     planned = _build_spec(db, session, schema)
     return SpecOut(
         session_id=session.id,
@@ -1064,7 +1082,7 @@ def patch_spec_operation(
     and a review screen is not a reason to open a second door to it.
     """
     session = _session(db, session_id, user)
-    _, _, schema = _context_for(db, session)
+    _, _, schema = _context_for(db, session, user)
     planned = _build_spec(db, session, schema)
 
     operations = planned.spec.operations
@@ -1177,7 +1195,7 @@ def compile_session(
             "another version.",
         )
 
-    template, version, schema = _context_for(db, session)
+    template, version, schema = _context_for(db, session, user)
     planned = _build_spec(db, session, schema, overrides=request.overrides)
 
     if not planned.spec.operations:
@@ -1255,5 +1273,5 @@ def abandon_session(
     db.commit()
     db.refresh(session)
 
-    template, version, schema = _context_for(db, session)
-    return _session_out(session, template, session_questions(session, db), schema)
+    template, version, schema = _context_for(db, session, user)
+    return _session_out(session, template, load_question_plan(db, version.id), schema)

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.access.templates import can_view_version, load_viewable, visible_templates_filter
 from app.api.deps import current_user, optional_user
 from app.core.config import settings
 from app.db.session import SessionLocal, get_db
@@ -45,24 +46,10 @@ ZIP_MAGIC = b"PK\x03\x04"
 MAX_PAGE_SIZE = 100
 
 
-def _visible_to(user: User | None, template: Template, version: TemplateVersion | None) -> bool:
-    """Whether this caller may see this template at all.
-
-    Approved templates are public to any signed-in user. An unapproved one is
-    visible only to the person who uploaded it and to admins -- the submitter
-    needs to watch their own upload through review, and an admin needs to
-    open it to decide. Everyone else gets a 404, not a 403: the existence of a
-    colleague's rejected draft is not theirs to learn.
-    """
-    if version is not None and version.approval_status == APPROVAL_APPROVED:
-        return True
-    if user is None:
-        return False
-    if user.role == ROLE_ADMIN:
-        return True
-    return template.owner_id == user.id or (
-        version is not None and version.submitted_by == user.id
-    )
+# The rule this module used to own now lives in `app.access.templates`, because
+# five other paths reached these same rows without asking it. It takes a session
+# now -- a restricted template's grants have to be looked up -- so it is called
+# directly rather than through the old zero-session alias.
 
 
 def _to_template_out(template: Template, version: TemplateVersion | None) -> TemplateOut:
@@ -85,6 +72,7 @@ def _to_template_out(template: Template, version: TemplateVersion | None) -> Tem
         searchable=template.embedding is not None,
         approval_status=version.approval_status if version is not None else APPROVAL_PENDING,
         review_note=version.review_note if version is not None else None,
+        visibility=template.visibility,
         owner_id=template.owner_id,
         current_version_id=template.current_version_id,
         created_at=template.created_at,
@@ -291,10 +279,16 @@ async def upload_new_version(
     and pointing the template at it would take the template out of the library
     until an admin approves -- which is a decision for whoever approves, not for
     whoever uploads.
+
+    **Gated on being able to see the template first.** This is a write, so it was
+    not on the list of read paths that leaked, but it read one: it took any
+    `template_id` from any signed-in caller, and the format check below answers
+    "This template is a .xlsx file" for a template the caller cannot open --
+    confirming it exists and what it is. It also let them queue a pending version
+    against it. Proposing a new version of an *approved* template is open to
+    everyone, as it was; an unapproved one is now its owner's and admins' alone.
     """
-    template = db.get(Template, template_id)
-    if template is None or template.status == "deleted":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
+    template, _ = load_viewable(db, template_id, user=user)
 
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_FORMATS:
@@ -433,9 +427,17 @@ def list_templates(
     if mine:
         if user is None:
             return []
+        # No access filter: these are the caller's own uploads. Owning a
+        # template is one of the ways `access_ok` grants access, so filtering
+        # here could only ever remove rows the rule already allows -- and
+        # restricting your own template must not hide it from you.
         query = query.filter(Template.owner_id == user.id)
     else:
         query = query.filter(TemplateVersion.approval_status == APPROVAL_APPROVED)
+        # The access half, in the query rather than over the fetched page: this
+        # route paginates, and filtering after the fact would return short pages
+        # and skip templates entirely.
+        query = query.filter(visible_templates_filter(user))
     if format is not None:
         query = query.filter(Template.format == format)
 
@@ -445,40 +447,24 @@ def list_templates(
     return [_to_template_out(template, version) for template, version in rows]
 
 
-def _version_for(db: Session, template_id: uuid.UUID, version_id: uuid.UUID | None) -> tuple[Template, TemplateVersion]:
-    """The template plus one of its versions, defaulting to the current one.
-
-    A version is only reachable *through* its template here. That is what stops
-    a caller walking other templates' versions by guessing UUIDs, and it is why
-    both endpoints below take `template_id` in the path even though `version_id`
-    alone would be enough to find the rows.
-    """
-    template = db.get(Template, template_id)
-    if template is None or template.status == "deleted":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
-
-    target_id = version_id or template.current_version_id
-    if target_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Template has no version."
-        )
-    version = db.get(TemplateVersion, target_id)
-    if version is None or version.template_id != template_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Version not found for this template."
-        )
-    return template, version
-
-
 @router.get("/{template_id}/ingestion/{job_id}", response_model=JobStatusOut)
 def ingestion_status(
-    template_id: uuid.UUID, job_id: uuid.UUID, db: Session = Depends(get_db)
+    template_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ) -> JobStatusOut:
     """Poll an ingestion job. Terminal states are `succeeded` and `failed`.
 
     The fingerprint is read from `template_versions` rather than copied into the
     job row -- it belongs to the bytes, not to the run that looked at them, and
     duplicating it would double the size of every job row for nothing.
+
+    **The caller is now resolved and checked.** This route reports on a version,
+    and it used to do so for any version whose job id was known -- including
+    versions of somebody else's unapproved upload. The uploader keeps access to
+    their own job because `can_view_version` grants the submitter it, which is
+    what the upload screen polls immediately after a 202.
     """
     job = db.get(Job, job_id)
     if job is None or job.kind != KIND_INGESTION:
@@ -486,7 +472,7 @@ def ingestion_status(
 
     # The job's entity is the version; check it really belongs to this template
     # so a job id can't be used to probe an unrelated template.
-    _, version = _version_for(db, template_id, job.entity_id)
+    _, version = load_viewable(db, template_id, job.entity_id, user=user)
 
     summary = job.result or {}
     return JobStatusOut(
@@ -521,6 +507,7 @@ def get_regions(
     template_id: uuid.UUID,
     version_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ) -> DocumentSchemaOut:
     """The persisted Document Schema. Defaults to the template's current version.
 
@@ -528,8 +515,13 @@ def get_regions(
     whole file. Not `ordinal`: that is the detector's own numbering and it
     restarts at 0 on every sheet, so BFL has four regions numbered 0 and sorting
     by it would interleave the sheets in whatever order Postgres returned them.
+
+    **This is a read of the document's contents, and it is now gated like one.**
+    A region schema names every field, label and protected area in the file; it
+    was previously served for any template id, approved or not, to a caller who
+    did not have to be signed in.
     """
-    template, version = _version_for(db, template_id, version_id)
+    template, version = load_viewable(db, template_id, version_id, user=user)
 
     schema_row = (
         db.query(DocumentSchemaRow)
@@ -584,7 +576,7 @@ def get_template(
     version = db.get(TemplateVersion, template.current_version_id) if template.current_version_id else None
     if version is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template has no version.")
-    if not _visible_to(user, template, version):
+    if not can_view_version(db, user, template, version):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
 
     return _to_template_out(template, version)
@@ -603,7 +595,7 @@ def download_template(
     version = db.get(TemplateVersion, template.current_version_id) if template.current_version_id else None
     if version is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template has no version.")
-    if not _visible_to(user, template, version):
+    if not can_view_version(db, user, template, version):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
 
     try:
