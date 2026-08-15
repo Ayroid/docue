@@ -1,0 +1,798 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Design-system component classes, ported from the Organic `styles.css` with
+   the prototype's radius retune folded in (btn/seg/input 9px, tag 6px,
+   card/dialog 14px) rather than layered on as an override.
+
+   These live as real CSS rather than Tailwind utility soup because the shadcn
+   primitives in `components/ui/` compose them — one class per component keeps
+   the rendered output byte-identical to the prototype.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    font-weight: 400;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-weight: var(--font-heading-weight);
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+    margin: 0 0 var(--space-2);
+  }
+  h1 {
+    font-size: 42px;
+  }
+  h2 {
+    font-size: 32px;
+  }
+  h3 {
+    font-size: 25px;
+  }
+  h4 {
+    font-size: 20px;
+  }
+  h5 {
+    font-size: 16px;
+  }
+  h6 {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  p {
+    margin: 0 0 var(--space-3);
+  }
+
+  a {
+    color: var(--color-accent-700);
+    text-decoration: none;
+    text-underline-offset: 3px;
+  }
+  a:hover {
+    color: var(--color-accent-600);
+    text-decoration: underline;
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+  }
+  figure {
+    margin: 0;
+  }
+  figcaption {
+    font-size: 11px;
+    margin-top: var(--space-1);
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  }
+
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+}
+
+@layer components {
+  .text-muted {
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  }
+
+  /* — rules — */
+  .hr {
+    height: 1px;
+    border: 0;
+    margin: var(--space-4) 0;
+    background: var(--color-divider);
+  }
+
+  /* — buttons — */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    text-decoration: none;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--md-on-surface);
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 10px var(--space-4);
+    border-radius: var(--radius-md);
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      color 0.15s ease;
+  }
+  .btn svg {
+    display: block;
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  /* The design's primary action is the near-black navy, not the blue — the
+     blue is reserved for links, the active tab and focus. */
+  .btn-primary {
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--md-primary-container);
+  }
+  .btn-primary:not(:disabled):active {
+    background: #0d1b33;
+  }
+  .btn-secondary {
+    background: var(--md-surface-container-lowest);
+    border-color: var(--md-outline-variant);
+    color: var(--md-on-surface);
+  }
+  .btn-secondary:not(:disabled):hover {
+    background: var(--md-surface-container);
+    border-color: var(--md-outline);
+  }
+  .btn-secondary:not(:disabled):active {
+    background: var(--md-surface-container-high);
+  }
+  .btn-ghost {
+    color: var(--md-secondary);
+    padding-inline: var(--space-2);
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: var(--color-accent-100);
+  }
+  .btn-ghost:not(:disabled):active {
+    background: var(--color-accent-200);
+  }
+  .btn-icon {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 9999px;
+  }
+  .btn-block {
+    width: 100%;
+    margin-top: var(--space-2);
+  }
+
+  /* — forms — */
+  .field > label {
+    display: block;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    margin-bottom: var(--space-2);
+    color: var(--md-on-surface-variant);
+  }
+  .input {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px var(--space-4);
+    font: inherit;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--md-on-surface);
+    caret-color: var(--md-secondary);
+    background: var(--md-surface-container-low);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--radius-lg);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .input::placeholder {
+    color: var(--md-on-surface-variant);
+    opacity: 0.75;
+  }
+  .input:hover:not(:disabled) {
+    border-color: var(--md-outline);
+  }
+  .input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background: var(--md-surface-container);
+  }
+  .input:focus-visible {
+    border-color: var(--md-secondary);
+    box-shadow: 0 0 0 3px rgb(0 88 190 / 0.15);
+    outline: none;
+    outline-offset: 0;
+  }
+  textarea.input {
+    min-height: 90px;
+    resize: vertical;
+  }
+
+  .seg {
+    display: inline-flex;
+    overflow: hidden;
+    background: var(--md-surface-container-low);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--radius-lg);
+  }
+  .seg-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    color: var(--md-on-surface-variant);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .seg-opt + .seg-opt {
+    border-left: 1px solid var(--md-outline-variant);
+  }
+  .seg-opt input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+  .seg-opt:has(input:checked) {
+    background: var(--md-secondary);
+    color: var(--md-on-secondary);
+  }
+  .seg-opt:not(:has(input:checked)):hover {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface);
+  }
+  .seg-opt:has(input:focus-visible) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
+  /* — cards — */
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+  }
+  .card-kicker {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+  }
+  .card-title {
+    font-family: var(--font-heading);
+    font-weight: var(--font-heading-weight);
+    font-size: 17px;
+    line-height: 1.2;
+  }
+  .card-body {
+    margin: 0;
+    font-size: 13px;
+    opacity: 0.8;
+    flex: 1;
+  }
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  }
+  .elev-sm {
+    box-shadow: var(--shadow-sm);
+  }
+  .elev-md {
+    box-shadow: var(--shadow-md);
+  }
+  .elev-lg {
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* — tags — */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: var(--radius-tag);
+  }
+  .tag-accent {
+    background: var(--color-accent-100);
+    color: var(--color-accent-700);
+  }
+  .tag-accent-2 {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
+  }
+  .tag-neutral {
+    background: var(--md-surface-container);
+    color: var(--md-on-surface-variant);
+  }
+  .tag-outline {
+    border: 1px solid var(--md-outline-variant);
+    color: var(--md-on-surface-variant);
+  }
+
+  /* — tables — */
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .table th {
+    text-align: left;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    text-transform: uppercase;
+    color: var(--md-on-surface-variant);
+    padding: var(--space-3) var(--space-4);
+    background: var(--md-surface-container-low);
+    border-bottom: 1px solid var(--md-outline-variant);
+  }
+  .table td {
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--md-surface-container-high);
+  }
+  .table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .table tbody tr {
+    transition: background-color 0.15s ease;
+  }
+  .table tbody tr:hover {
+    background: var(--md-surface-container-low);
+  }
+
+  /* — dialog — */
+  .dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: var(--space-4);
+    background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
+    z-index: 50;
+  }
+  .dialog {
+    width: min(440px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-lg);
+  }
+  .dialog-title {
+    font-family: var(--font-heading);
+    font-weight: var(--font-heading-weight);
+    font-size: 20px;
+  }
+  .dialog-body {
+    font-size: 14px;
+    opacity: 0.85;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+  }
+
+  /* ── Hub-specific classes, lifted from the prototype's <style> block ────── */
+
+  /* Horizontal tab in the header bar: the active one is marked by a blue
+     underline and weight, not a filled pill. */
+  .hub-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 48px;
+    padding: 0 var(--space-1);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 14px;
+    line-height: 20px;
+    white-space: nowrap;
+    color: var(--md-on-surface-variant);
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .hub-nav:hover {
+    color: var(--md-on-surface);
+  }
+  .hub-nav[aria-current='page'] {
+    color: var(--md-secondary);
+    border-bottom-color: var(--md-secondary);
+    font-weight: 700;
+  }
+
+  /* Sidebar variant, kept for the collapsed/mobile drawer. */
+  .hub-nav-stacked {
+    width: 100%;
+    height: auto;
+    padding: 10px var(--space-3);
+    border-bottom: 0;
+    border-radius: var(--radius-md);
+    text-align: left;
+  }
+  .hub-nav-stacked:hover {
+    background: var(--md-surface-container);
+  }
+  .hub-nav-stacked[aria-current='page'] {
+    background: var(--color-accent-100);
+    border-bottom: 0;
+  }
+
+  .hub-tcard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--md-surface-container-lowest);
+    border: 1px solid var(--md-outline-variant);
+    box-shadow: var(--shadow-sm);
+    transition:
+      box-shadow 0.2s ease,
+      border-color 0.2s ease;
+  }
+  .hub-tcard:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--md-outline);
+  }
+
+  /* Status pills — Stitch shows Approved green, Draft/neutral grey, failed
+     red, each with a leading dot. */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    white-space: nowrap;
+  }
+  .pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: currentColor;
+  }
+  .pill-ok {
+    background: #e3f7ee;
+    color: #056d47;
+  }
+  .pill-warn {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
+  }
+  .pill-bad {
+    background: var(--md-error-container);
+    color: var(--md-on-error-container);
+  }
+
+  .hub-chip {
+    white-space: nowrap;
+  }
+
+  /* The "Preserved: …" badge swaps to a short form when the bottom bar tightens. */
+  .hub-preserve-short {
+    display: none;
+  }
+  @media (max-width: 1100px) {
+    .hub-preserve-full {
+      display: none;
+    }
+    .hub-preserve-short {
+      display: inline-flex;
+    }
+  }
+
+  /* Two-column page shells collapse to one below 1100px. */
+  @media (max-width: 1100px) {
+    .hub-results {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+  }
+
+  /* My-documents table sheds columns as it narrows rather than scrolling. */
+  .hub-mydocs > thead > tr > th:nth-child(3),
+  .hub-mydocs > tbody > tr > td:nth-child(3) {
+    white-space: nowrap;
+  }
+  @media (max-width: 1080px) {
+    .hub-mydocs > thead > tr > th:nth-child(2),
+    .hub-mydocs > tbody > tr > td:nth-child(2),
+    .hub-mydocs > thead > tr > th:nth-child(3),
+    .hub-mydocs > tbody > tr > td:nth-child(3) {
+      display: none;
+    }
+  }
+  @media (max-width: 640px) {
+    .hub-mydocs > thead > tr > th:nth-child(4),
+    .hub-mydocs > tbody > tr > td:nth-child(4) {
+      display: none;
+    }
+    .hub-mydocs > tbody > tr > td:last-child > div {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+
+  /* Client-side document preview (docx-preview/exceljs/pptx-preview render
+     into this surface imperatively, outside React's vdom). */
+  .document-preview-surface {
+    padding: 14px;
+  }
+
+  .xlsx-preview-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .xlsx-preview-tabs button {
+    font: inherit;
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--color-divider);
+    background: transparent;
+    cursor: pointer;
+  }
+  .xlsx-preview-tabs button.active {
+    background: var(--color-accent-100);
+    border-color: var(--color-accent-400);
+    font-weight: 600;
+  }
+
+  /* The sheet is a white canvas, like Excel's. Without this the cells are
+     transparent and the app's background tints the whole grid, which also
+     makes the fills that *are* in the file read as barely-there tints. */
+  .xlsx-preview-body {
+    background: #fff;
+  }
+
+  .xlsx-preview-table {
+    border-collapse: collapse;
+    font-size: 12.5px;
+    background: #fff;
+  }
+  .xlsx-preview-table td {
+    /* Excel's gridline grey rather than the app's divider token — this is
+       sheet furniture, not app chrome. */
+    border: 1px solid #d8d8d8;
+    padding: 4px 8px;
+    white-space: pre-wrap;
+    /* A default only: a cell carrying a fill sets it inline, which wins. */
+    background: #fff;
+  }
+
+  /* — document library: list rail + reader pane — */
+
+  /* The format filter stretches to the rail rather than sitting inline. */
+  .doc-library-filter {
+    display: flex;
+    width: 100%;
+  }
+  .doc-library-filter .seg-opt {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Scrolls on its own so the reader pane beside it stays put while you hunt
+     through a long library. */
+  .doc-library-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 62vh;
+    overflow-y: auto;
+    margin: 0 -6px;
+    padding: 0 6px;
+  }
+
+  .doc-library-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    color: var(--color-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .doc-library-row:hover {
+    background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  }
+  .doc-library-row.active {
+    background: var(--color-accent-100);
+    border-color: var(--color-accent-400);
+  }
+  .doc-library-row:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
+  /* Below the two-column collapse the rail sits above the reader, so a tall
+     list would push the preview off-screen. */
+  @media (max-width: 1100px) {
+    .doc-library-list {
+      max-height: 34vh;
+    }
+  }
+
+  /* ── Indeterminate spinner ─────────────────────────────────────────────
+     For work with no measurable progress — an agent thinking, a request in
+     flight. A skeleton is the better answer whenever the *shape* of what is
+     coming is known; this is for when it genuinely is not.
+
+     The ring is a full circle of the accent at low opacity with one arc at
+     full strength, so what rotates reads as a moving highlight rather than a
+     fragment of a circle. */
+  .hub-spinner {
+    border-radius: 9999px;
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+    border-top-color: var(--color-accent);
+    animation: hubspin 0.85s linear infinite;
+  }
+
+  /* Unlike the skeleton shimmer this is not dropped outright: it is the only
+     signal that anything is happening, and removing it would leave a still
+     ring that reads as broken. It becomes a pulse in place instead — the
+     information survives, the rotation does not. */
+  @media (prefers-reduced-motion: reduce) {
+    .hub-spinner {
+      border-top-color: var(--color-accent);
+      animation: hubpulse 1.6s ease-in-out infinite;
+    }
+  }
+
+  @keyframes hubspin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes hubpulse {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /* ── Skeleton placeholders ──────────────────────────────────────────────
+     One class, driven by `components/ui/skeleton.tsx`. The gradient is 200%
+     wide so the highlight has somewhere to travel from and to; the keyframe
+     slides `background-position` across it.
+
+     The base tint is `--md-surface-container-high` rather than a hard grey so
+     a skeleton reads as the surface it is standing in for, not as a hole in
+     the page. */
+  .hub-skeleton {
+    background-color: var(--md-surface-container-high);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, #fff 62%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+  }
+
+  /* Vestibular disorders are triggered by exactly this kind of continuous
+     travelling motion, and a skeleton is on screen for as long as the network
+     takes. The placeholder still reads as "content pending" without it — the
+     shape and the tint carry that on their own — so the animation is dropped
+     rather than substituted. */
+  @media (prefers-reduced-motion: reduce) {
+    .hub-skeleton {
+      background-image: none;
+      animation: none !important;
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Rendered document content
+
+   Deliberately outside `@layer base` so it isn't demoted beneath Tailwind's
+   preflight.
+
+   This is a *typography* firewall, not a general reset. Measured against
+   docx-preview 0.4: it already ships its own `.docx`-scoped baseline
+   (`.docx p { margin: 0pt }`, `.docx table { border-collapse: collapse }`,
+   `.docx a { color: inherit }`, the grey backdrop and white page sheets) at
+   specificity (0,1,1), which outranks both preflight and the design system —
+   so paragraph margins, table borders, cell shading, list markers and image
+   sizing all already survive. It emits no `h1`-`h6`/`ul`/`ol`/`li` at all
+   (Word paragraphs become `<p>`, list markers are `::before` counters), so
+   resetting those would be dead weight.
+
+   What genuinely leaks is inheritance: `body` sets the Organic brand font,
+   15px and line-height 1.55, and every run the document doesn't explicitly
+   style picks them up — so a Word file renders in the app's typeface at the
+   app's size. Neutralise it once here, at the boundary, rather than fighting
+   it per element. Anything the document *does* specify still wins, because
+   docx-preview writes those as inline styles or `.docx`-scoped rules.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* docx-preview paints its own mid-grey behind the page sheets. Once the deck
+   is scaled to fit (see `fitToWidth`) that block no longer covers the panel,
+   so it reads as a stray band — let the surface's own backdrop show instead. */
+.doc-render-root .docx-wrapper {
+  background: transparent;
+}
+
+.doc-render-root {
+  /* Word's own default body face, with Carlito (the metric-compatible clone
+     that ships on Linux) and a generic behind it. */
+  font-family: Calibri, Carlito, 'Segoe UI', Arial, sans-serif;
+  font-size: 11pt;
+  font-weight: 400;
+  font-style: normal;
+  line-height: normal;
+  letter-spacing: normal;
+  text-align: left;
+  color: #000;
+}

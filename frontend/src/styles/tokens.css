@@ -1,0 +1,121 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Design tokens — the Stitch "Docue Professional" system.
+
+   Stitch names its roles the Material-3 way (primary / on-surface /
+   surface-container-*). Those names are kept as the source of truth below,
+   and the app's existing role names are mapped onto them underneath, so
+   `tailwind.config.ts` and `components.css` keep working unchanged while
+   every colour on screen comes from the Stitch palette.
+
+   These are the ONLY hex literals in the app.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Stitch roles, verbatim ─────────────────────────────────────────── */
+  --md-primary: #091426;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #1e293b;
+  --md-on-primary-container: #8590a6;
+
+  --md-secondary: #0058be;
+  --md-on-secondary: #ffffff;
+  --md-secondary-container: #2170e4;
+  --md-on-secondary-container: #fefcff;
+
+  --md-tertiary: #00190e;
+  --md-on-tertiary: #ffffff;
+  --md-tertiary-container: #00301e;
+  --md-on-tertiary-container: #00a472;
+
+  --md-background: #f7f9fb;
+  --md-surface: #f7f9fb;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f2f4f6;
+  --md-surface-container: #eceef0;
+  --md-surface-container-high: #e6e8ea;
+  --md-surface-container-highest: #e0e3e5;
+  --md-surface-dim: #d8dadc;
+
+  --md-on-surface: #191c1e;
+  --md-on-surface-variant: #45474c;
+  --md-outline: #75777d;
+  --md-outline-variant: #c5c6cd;
+
+  --md-error: #ba1a1a;
+  --md-on-error: #ffffff;
+  --md-error-container: #ffdad6;
+  --md-on-error-container: #93000a;
+
+  --md-inverse-surface: #2d3133;
+  --md-inverse-on-surface: #eff1f3;
+
+  /* ── App roles, mapped onto the above ───────────────────────────────── */
+  --color-bg: var(--md-background);
+  --color-surface: var(--md-surface-container-lowest);
+  --color-text: var(--md-on-surface);
+  --color-accent: var(--md-secondary);
+  --color-accent-2: var(--md-primary);
+  --color-divider: var(--md-outline-variant);
+
+  /* Neutral ramp — Stitch's surface ladder extended at both ends so the
+     existing 100..900 call sites keep resolving. */
+  --color-neutral-100: #ffffff;
+  --color-neutral-200: var(--md-surface-container-low);
+  --color-neutral-300: var(--md-surface-container-high);
+  --color-neutral-400: var(--md-outline-variant);
+  --color-neutral-500: var(--md-outline);
+  --color-neutral-600: #5d6067;
+  --color-neutral-700: var(--md-on-surface-variant);
+  --color-neutral-800: #2d3133;
+  --color-neutral-900: var(--md-on-surface);
+
+  /* Accent ramp — tints and shades of Stitch's blue. */
+  --color-accent-100: #e8f0fd;
+  --color-accent-200: #cfe0fb;
+  --color-accent-300: #a6c5f6;
+  --color-accent-400: #6ea2ef;
+  --color-accent-500: #2170e4;
+  --color-accent-600: var(--md-secondary);
+  --color-accent-700: #00479a;
+  --color-accent-800: #003471;
+  --color-accent-900: #00224a;
+
+  /* Second accent ramp — the navy, used for chips and quieter emphasis. */
+  --color-accent-2-100: #eceef2;
+  --color-accent-2-200: #d5dae3;
+  --color-accent-2-300: #b3bccb;
+  --color-accent-2-400: #8590a6;
+  --color-accent-2-500: #5b6880;
+  --color-accent-2-600: #3c475a;
+  --color-accent-2-700: #263145;
+  --color-accent-2-800: var(--md-primary-container);
+  --color-accent-2-900: var(--md-primary);
+
+  /* ── Type — Stitch is Inter throughout, headings included ───────────── */
+  --font-heading: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading-weight: 600;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* ── Spacing — Stitch's 4/8/16/24/32 scale ──────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --container-max: 1280px;
+
+  /* ── Radius — Stitch: 4 / 8 / 12 / full ─────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-control: 8px;
+  --radius-tag: 9999px;
+  --radius-card: 12px;
+
+  /* ── Elevation — Stitch leans on soft, tight shadows ────────────────── */
+  --shadow-sm: 0 1px 2px 0 rgb(9 20 38 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(9 20 38 / 0.08), 0 2px 4px -2px rgb(9 20 38 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(9 20 38 / 0.1), 0 4px 6px -4px rgb(9 20 38 / 0.05);
+}
