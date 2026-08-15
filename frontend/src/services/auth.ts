@@ -15,7 +15,7 @@
 const API_BASE_URL = '/api/v1'
 
 /* One key, exported so tests and the provider cannot drift from each other. */
-export const TOKEN_KEY = 'templatehub.token'
+export const TOKEN_KEY = 'docue.token'
 
 export type Role = 'admin' | 'user'
 export type UserStatus = 'pending' | 'active' | 'disabled'

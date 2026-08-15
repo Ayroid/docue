@@ -30,7 +30,7 @@ export function AuthLayout({
           <div className="w-10 h-10 rounded-md bg-accent2-900 text-white grid place-items-center">
             <Icon name="hub" size={22} />
           </div>
-          <span className="font-heading text-headline-md text-accent2-900 tracking-tight">TemplateHub</span>
+          <span className="font-heading text-headline-md text-accent2-900 tracking-tight">Docue</span>
         </Button>
       </div>
 

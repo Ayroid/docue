@@ -110,7 +110,7 @@ export function AppShell() {
               <Icon name="hub" size={22} />
             </div>
             <span className="font-heading text-headline-md text-accent2-900 tracking-tight hidden sm:block">
-              TemplateHub
+              Docue
             </span>
           </Link>
 
@@ -198,7 +198,7 @@ export function AppShell() {
       <footer className="border-t border-divider bg-surface">
         <div className="max-w-container mx-auto px-[clamp(16px,3vw,32px)] h-14 flex items-center justify-between gap-4 text-label-md text-neutral-600">
           <span>YMSLI Internal Use Only</span>
-          <span className="hidden sm:block">© {new Date().getFullYear()} TemplateHub</span>
+          <span className="hidden sm:block">© {new Date().getFullYear()} Docue</span>
         </div>
       </footer>
 

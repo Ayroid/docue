@@ -71,11 +71,11 @@ export function DocumentViewer() {
   const template = load.state === 'ready' ? load.template : null
 
   /* Name the browser tab after the file — several of these are usually open at
-     once, and "TemplateHub" on all of them tells you nothing. */
+     once, and "Docue" on all of them tells you nothing. */
   useEffect(() => {
     if (!template) return
     const previous = document.title
-    document.title = `${template.original_filename} · TemplateHub`
+    document.title = `${template.original_filename} · Docue`
     return () => {
       document.title = previous
     }

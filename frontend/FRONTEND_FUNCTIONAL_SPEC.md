@@ -1,4 +1,4 @@
-# TemplateHub frontend — functional specification
+# Docue frontend — functional specification
 
 Written so the UI can be rebuilt on a new theme without losing behaviour.
 Everything below is what the app **does**; nothing here is a styling
@@ -6,7 +6,7 @@ requirement except the section explicitly marked as one.
 
 Stack: React 18 + TypeScript, Vite 6, react-router-dom 6, Tailwind 3 over CSS
 custom properties, Radix primitives (`@radix-ui/react-dialog`, `react-slot`).
-Source root `frontend/src`.
+Source root `src`.
 
 ---
 
