@@ -33,7 +33,7 @@ from app.models.user import ROLE_ADMIN, STATUS_ACTIVE, User  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed the first TemplateHub administrator.")
+    parser = argparse.ArgumentParser(description="Seed the first Docue administrator.")
     parser.add_argument("--email", default=settings.seed_admin_email)
     parser.add_argument("--username", default=settings.seed_admin_username)
     parser.add_argument("--password", default=settings.seed_admin_password)

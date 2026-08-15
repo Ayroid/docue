@@ -78,26 +78,26 @@ def send_email(to: str, subject: str, body: str) -> bool:
 def send_verification_otp(to: str, name: str, code: str, ttl_minutes: int) -> bool:
     return send_email(
         to,
-        "Your TemplateHub verification code",
+        "Your Docue verification code",
         f"Hi {name},\n\n"
-        f"Your TemplateHub email verification code is:\n\n"
+        f"Your Docue email verification code is:\n\n"
         f"    {code}\n\n"
-        f"It expires in {ttl_minutes} minutes. If you did not create a TemplateHub "
+        f"It expires in {ttl_minutes} minutes. If you did not create a Docue "
         f"account, you can ignore this message.\n\n"
-        f"-- TemplateHub, YMSLI\n",
+        f"-- Docue, YMSLI\n",
     )
 
 
 def send_password_reset_otp(to: str, name: str, code: str, ttl_minutes: int) -> bool:
     return send_email(
         to,
-        "Your TemplateHub password reset code",
+        "Your Docue password reset code",
         f"Hi {name},\n\n"
-        f"Use this code to reset your TemplateHub password:\n\n"
+        f"Use this code to reset your Docue password:\n\n"
         f"    {code}\n\n"
         f"It expires in {ttl_minutes} minutes. If you did not ask to reset your "
         f"password, ignore this message -- your current password still works.\n\n"
-        f"-- TemplateHub, YMSLI\n",
+        f"-- Docue, YMSLI\n",
     )
 
 
@@ -108,9 +108,9 @@ def send_approval_requested(to: str, admin_name: str, title: str, submitter: str
         f"Hi {admin_name},\n\n"
         f"{submitter} submitted a template version for approval:\n\n"
         f"    {title}\n\n"
-        f"Review it in the TemplateHub admin panel. It is not visible in the "
+        f"Review it in the Docue admin panel. It is not visible in the "
         f"library until it is approved.\n\n"
-        f"-- TemplateHub, YMSLI\n",
+        f"-- Docue, YMSLI\n",
     )
 
 
@@ -123,8 +123,8 @@ def send_template_approved(to: str, name: str, title: str, reviewer: str, note: 
         f"{reviewer} approved your template:\n\n"
         f"    {title}\n"
         f"{tail}\n"
-        f"It is now published in the TemplateHub library.\n\n"
-        f"-- TemplateHub, YMSLI\n",
+        f"It is now published in the Docue library.\n\n"
+        f"-- Docue, YMSLI\n",
     )
 
 
@@ -137,5 +137,5 @@ def send_template_rejected(to: str, name: str, title: str, reviewer: str, note: 
         f"    {title}\n\n"
         f"Reason: {note}\n\n"
         f"It has not been published. Upload a corrected version when it is ready.\n\n"
-        f"-- TemplateHub, YMSLI\n",
+        f"-- Docue, YMSLI\n",
     )

@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="TemplateHub API", lifespan=lifespan)
+app = FastAPI(title="Docue API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

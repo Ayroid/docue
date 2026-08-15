@@ -24,11 +24,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_USER: templatehub
-      POSTGRES_PASSWORD: templatehub
-      POSTGRES_DB: templatehub
+      POSTGRES_USER: docue
+      POSTGRES_PASSWORD: docue
+      POSTGRES_DB: docue
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U templatehub -d templatehub"]
+      test: ["CMD-SHELL", "pg_isready -U docue -d docue"]
       interval: 10s
       timeout: 5s
       retries: 5

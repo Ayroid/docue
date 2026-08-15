@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Settings are required at import time; these are placeholders so the analysis
 # half can run with no `.env`. Nothing here opens a connection.
-os.environ.setdefault("DATABASE_URL", "postgresql+psycopg2://u:p@localhost:5432/templatehub")
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg2://u:p@localhost:5432/docue")
 os.environ.setdefault("AWS_REGION", "ap-south-1")
 os.environ.setdefault("S3_BUCKET_NAME", "placeholder")
 

@@ -1120,7 +1120,7 @@ wheels = [
 ]
 
 [[package]]
-name = "templatehub-backend"
+name = "docue-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

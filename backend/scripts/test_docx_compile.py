@@ -101,7 +101,7 @@ WORK_ITEM_ROWS = [
 REVISION_ROW = {
     "Ver.": "2.0",
     "Date": "13/08/2026",
-    "Updated by": "TemplateHub",
+    "Updated by": "Docue",
     "Revision summary": "AP automation cycle 2",
     "Description": "Derived from Ver. 1.0 for invoice header capture",
 }

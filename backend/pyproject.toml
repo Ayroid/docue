@@ -1,5 +1,5 @@
 [project]
-name = "templatehub-backend"
+name = "docue-backend"
 version = "0.1.0"
 description = "Backend for Ymsli Hackethon"
 authors = [

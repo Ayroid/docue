@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_use_tls: bool = True
-    smtp_from: str = "TemplateHub <no-reply@yamaha-motor-india.com>"
+    smtp_from: str = "Docue <no-reply@yamaha-motor-india.com>"
     smtp_timeout_seconds: float = 15.0
 
     # Returns the OTP in the API response so local work does not need a

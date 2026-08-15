@@ -32,7 +32,7 @@ def _ca_bundle_path() -> str:
         for der, _encoding, _trust in ssl.enum_certificates(store):
             bundle += ssl.DER_cert_to_PEM_cert(der)
 
-    fd, path = tempfile.mkstemp(prefix="templatehub_ca_bundle_", suffix=".pem")
+    fd, path = tempfile.mkstemp(prefix="docue_ca_bundle_", suffix=".pem")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(bundle)
     return path
