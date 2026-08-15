@@ -1,7 +1,9 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TemplateApiError, type TemplateOut } from '@/services/templates'
 import { saveTemplateToDisk } from '@/features/document-library/saveToDisk'
+import { ShareDialog } from '@/features/access/ShareDialog'
+import { useAuth } from '@/store/AuthProvider'
 import { useHub } from '@/store/HubProvider'
 import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -50,8 +52,11 @@ const MAX_TAGS = 3
 export function RealTemplateCard({ template }: { template: TemplateOut }) {
   const navigate = useNavigate()
   const { fireToast } = useHub()
+  const { isAdmin } = useAuth()
+  const [shareOpen, setShareOpen] = useState(false)
   const version = template.current_version
   const pill = APPROVAL_PILL[template.approval_status]
+  const restricted = template.visibility === 'restricted'
 
   /* Date only — the time of day was never what distinguishes one template
      from another, and it is what forced the timestamp onto its own row. */
@@ -73,7 +78,23 @@ export function RealTemplateCard({ template }: { template: TemplateOut }) {
   }, [template, fireToast])
 
   return (
-    <article className="hub-tcard">
+    <article
+      className="hub-tcard"
+      /* Right-click is the SharePoint muscle memory this was asked for, and it
+         is deliberately *not* the only way in — the kebab in the action row
+         opens the same dialog, because a right-click-only affordance is
+         invisible to anyone who does not already expect it and unreachable on
+         a touch screen. The browser's own menu is left alone for everyone who
+         cannot act on it, so non-admins keep copy/paste on a card. */
+      onContextMenu={
+        isAdmin
+          ? (event) => {
+              event.preventDefault()
+              setShareOpen(true)
+            }
+          : undefined
+      }
+    >
       <div className="flex items-start gap-3">
         <FormatChip size={40}>{CHIP_BY_FORMAT[template.format]}</FormatChip>
 
@@ -104,6 +125,19 @@ export function RealTemplateCard({ template }: { template: TemplateOut }) {
       </p>
 
       <div className="flex flex-wrap items-center gap-1.5 min-h-6">
+        {/* Shown to everyone who can see the card, not just admins. A user who
+            has been given access to a restricted document should know it is
+            restricted — that it reached them is the exception, not the rule,
+            and it tells them not to forward it. */}
+        {restricted ? (
+          <Tag
+            variant="outline"
+            className="text-[11px] py-[2px] px-[8px]"
+            title="Only chosen people, the owner and admins can see this template."
+          >
+            Restricted
+          </Tag>
+        ) : null}
         {template.category ? (
           <Tag variant="accent" className="text-[11px] py-[2px] px-[8px]">
             {template.category}
@@ -188,7 +222,35 @@ export function RealTemplateCard({ template }: { template: TemplateOut }) {
         >
           <Icon name="download" size={18} />
         </Button>
+        {/* The discoverable half of the pair. Right-clicking the card opens the
+            same dialog for the same people — this exists because a
+            right-click-only affordance is invisible to anyone who does not
+            already expect it, and unreachable on a touch screen. */}
+        {isAdmin ? (
+          <Button
+            variant="bare"
+            size="icon"
+            className="w-9 h-9 flex-none text-neutral-600 hover:bg-neutral-200"
+            title={`Manage access for ${template.title}`}
+            aria-label={`Manage access for ${template.title}`}
+            onClick={() => setShareOpen(true)}
+          >
+            <Icon name="more_vert" size={18} />
+          </Button>
+        ) : null}
       </div>
+
+      {/* Mounted only for admins, and only once opened does it fetch: the
+          dialog loads the access list on `open`, so a grid of twenty cards
+          costs twenty *nothing*s rather than twenty requests. */}
+      {isAdmin ? (
+        <ShareDialog
+          templateId={template.id}
+          templateTitle={template.title}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      ) : null}
     </article>
   )
 }

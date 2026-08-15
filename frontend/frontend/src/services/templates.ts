@@ -56,6 +56,13 @@ export interface TemplateOut {
   approval_status: 'pending' | 'approved' | 'rejected'
   /** The reviewer's note. Set on a rejection, optional on an approval. */
   review_note: string | null
+  /* Who the template is published *to*, as distinct from `approval_status`,
+     which is whether it is published at all. The two are independent gates:
+     an approved template can be restricted, and a restricted one can still be
+     awaiting review. 'restricted' means only the owner, admins and people
+     holding a grant can see it — so anything the library returned to a
+     non-admin was legal to show, whatever this says. */
+  visibility: 'public' | 'restricted'
   owner_id: string | null
   current_version_id: string
   created_at: string
@@ -249,7 +256,9 @@ export async function getTemplateRegions(id: string, versionId?: string): Promis
   const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : ''
   let res: Response
   try {
-    res = await fetch(`${API_BASE_URL}/templates/${id}/regions${query}`)
+    res = await fetch(`${API_BASE_URL}/templates/${id}/regions${query}`, {
+      headers: { ...authHeader() },
+    })
   } catch {
     throw new TemplateApiError(0, 'Could not reach the Template Hub server.')
   }
