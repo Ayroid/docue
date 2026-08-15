@@ -16,9 +16,9 @@ Four things are checked:
    `schema_json` unconverted would fail on insert, at which point the only clue
    would be a failed job row.
 3. **Model / migration parity** — column names in `Base.metadata` against the
-   DDL migration `0002` actually renders. This is the drift that bites months
-   later: a model gains a column, nobody writes the migration, and it works on
-   every developer's already-migrated database.
+   DDL the single baseline migration actually renders. This is the drift that
+   bites months later: a model gains a column, nobody updates the migration,
+   and it works on every developer's already-migrated database.
 4. **The API contract** — the routes exist, `POST /templates` answers 202, and
    the response models are the ones Track C is being asked to build against.
 
@@ -227,7 +227,8 @@ _ADD_COLUMN_RE = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)")
 
 
 def _rendered_migration_sql() -> str | None:
-    """Ask alembic to render 0001 -> 0002 as SQL. Offline: no connection made.
+    """Ask alembic to render the single baseline migration as SQL. Offline: no
+    connection made.
 
     Run as a subprocess through the console script rather than imported, because
     the repo has an `alembic/` directory that shadows the installed package when
@@ -237,7 +238,7 @@ def _rendered_migration_sql() -> str | None:
     for candidate in ("alembic", "alembic.exe"):
         try:
             completed = subprocess.run(
-                [candidate, "-c", "alembic.ini", "upgrade", "0001:0002", "--sql"],
+                [candidate, "-c", "alembic.ini", "upgrade", "head", "--sql"],
                 cwd=root,
                 capture_output=True,
                 text=True,
@@ -277,7 +278,7 @@ def check_migration_parity() -> list[str]:
     failures: list[str] = []
     for table in ("document_schemas", "document_regions", "jobs"):
         if table not in created:
-            failures.append(f"migration 0002 does not create {table}")
+            failures.append(f"the migration does not create {table}")
             continue
         model_columns = set(Base.metadata.tables[table].columns.keys())
         missing = model_columns - created[table]
@@ -289,7 +290,9 @@ def check_migration_parity() -> list[str]:
         print(f"  {table:20s} {len(model_columns)} columns, model and migration agree"
               if not (missing or extra) else f"  {table:20s} MISMATCH")
 
-    # The harvest columns are added to tables 0001 already created.
+    # These columns are inline on templates/template_versions in the baseline
+    # migration now, rather than added by a later ALTER TABLE -- still worth
+    # checking explicitly since they're easy to typo or drop by accident.
     for table, column in (
         ("templates", "form_id"),
         ("templates", "house_pattern"),
@@ -297,7 +300,7 @@ def check_migration_parity() -> list[str]:
         ("template_versions", "fingerprint"),
     ):
         if column not in created.get(table, set()):
-            failures.append(f"migration 0002 never adds {table}.{column}")
+            failures.append(f"the migration never creates {table}.{column}")
         elif column not in Base.metadata.tables[table].columns:
             failures.append(f"{table}.{column} is in the migration but not on the model")
         else:

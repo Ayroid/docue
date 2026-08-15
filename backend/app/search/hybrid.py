@@ -43,7 +43,8 @@ __all__ = ["SearchHit", "SearchOutcome", "search"]
 # is the behaviour that makes fusion worth doing.
 RRF_K = 60
 
-# Kept identical to migration 0003's index expression. If these drift, Postgres
+# Kept identical to alembic/versions/0001_initial_schema.py's index expression.
+# If these drift, Postgres
 # silently stops using the index and the query falls back to a sequential scan
 # that still returns correct results -- slow and green, the worst failure shape.
 _TSVECTOR = """

@@ -6,9 +6,11 @@
 The live half seeds the five corpus documents through the real enrichment
 pass -- classify, metadata, embed -- inserts them, runs the two demo queries
 from plan §13, and **rolls the whole thing back**. Nothing is written to the
-shared database, including the `0003` columns, which the script creates inside
-the same transaction when they are not there yet. That means this proves the
-search path before the migration is applied anywhere.
+shared database, including the discovery-metadata/embedding columns, which the
+script creates inside the same transaction when they are not there yet (`IF
+NOT EXISTS`, so it's a no-op once the baseline migration has applied them).
+That means this proves the search path before the migration is applied
+anywhere.
 
 The two queries are the demo, and they are chosen to fail without one half each:
 

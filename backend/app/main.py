@@ -16,51 +16,43 @@ from app.api.v1.templates import router as templates_router
 from app.api.v1.versions import router as versions_router
 from app.core.config import settings
 from app.db.session import check_db_connection
+from app.storage.s3 import ensure_bucket
 
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger("app")
 
 
-def check_bedrock_credentials() -> None:
+def check_llm_credentials() -> None:
     """Say at startup whether the model stages can run at all.
 
     Every stage catches `BedrockError` and degrades quietly on purpose -- an
-    outage should cost a longer interview, not a 500. The cost of that design is
-    that a *configuration* problem is indistinguishable from an outage, and it
-    surfaces one screen at a time: "the questions are grouped structurally",
-    "the extractor was unavailable", "derivation was unavailable". Three
-    messages, no cause named, nothing in the log but warnings.
-
-    So the check happens once, here, where it can name the fix. It resolves
-    credentials without calling Bedrock -- a live `InvokeModel` at startup would
-    cost money on every reload and fail for reasons that are not configuration.
+    outage should cost a longer interview, not a 500. The cost of that design
+    is that a *configuration* problem is indistinguishable from an outage. So
+    the check happens once, here: no live call (a live request at startup
+    would cost time/quota on every reload for no benefit), just whether an
+    API key is present.
     """
-    import boto3
-
-    if settings.aws_bearer_token_bedrock:
-        logger.info("Bedrock: using the API key from AWS_BEARER_TOKEN_BEDROCK")
-        return
-    if boto3.Session().get_credentials() is not None:
-        logger.info(
-            "Bedrock: no AWS_BEARER_TOKEN_BEDROCK; falling back to the default "
-            "credential chain, which must hold bedrock:InvokeModel"
+    if not settings.llm_api_key:
+        logger.error(
+            "LLM proxy has NO credentials: LLM_API_KEY is unset. Every model "
+            "stage will fail and the app will report itself as running "
+            "without the language model -- questions grouped structurally, "
+            "nothing extracted, nothing derived. Set LLM_API_KEY in .env and "
+            "restart."
         )
         return
-    logger.error(
-        "Bedrock has NO credentials: AWS_BEARER_TOKEN_BEDROCK is unset and the "
-        "default credential chain resolved nothing. Every model stage will fail "
-        "and the app will report itself as running without the language model -- "
-        "questions grouped structurally, nothing extracted, nothing derived. "
-        "Set AWS_BEARER_TOKEN_BEDROCK in .env (the ABSK... key, not an "
-        "access-key pair) and restart."
-    )
+    logger.info("LLM proxy: using LLM_API_KEY against %s", settings.llm_base_url)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     check_db_connection()
-    check_bedrock_credentials()
+    try:
+        ensure_bucket()
+    except Exception:
+        logger.exception("Could not ensure S3 bucket '%s' exists", settings.s3_bucket_name)
+    check_llm_credentials()
     yield
 
 

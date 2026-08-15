@@ -14,38 +14,28 @@ class Settings(BaseSettings):
     # Leave unset to use boto3's default credential chain (aws configure / IAM role)
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
+    # Points boto3 at local MinIO instead of real AWS S3. Leave unset in a
+    # real AWS deployment -- `endpoint_url=None` is a no-op for boto3.
+    s3_endpoint_url: str | None = None
 
-    # ── Bedrock ───────────────────────────────────────────────────────────
-    # Separate from the S3 credentials on purpose: Bedrock needs
-    # `bedrock:InvokeModel`, which the key that reaches S3 does not have, and
-    # Bedrock may not be enabled in the same region. Leave these unset to fall
-    # back to the AWS values above.
-    bedrock_region: str | None = None
-    bedrock_access_key_id: str | None = None
-    bedrock_secret_access_key: str | None = None
-    # The Bedrock API key (`ABSK...`). botocore reads this from the *process
-    # environment*, not from us, so `get_runtime` exports it before building the
-    # client -- see the note there.
-    #
-    # Declaring the field is what makes `.env` work at all. Without it,
-    # `extra="ignore"` silently discarded the line, and a machine configured
-    # exactly as `.env.example` documents got a backend where every model call
-    # failed at runtime with nothing said at startup.
-    aws_bearer_token_bedrock: str | None = None
-    # The `us.` prefix is a cross-region inference profile, not a typo: a bare
-    # `anthropic.claude-sonnet-5` is refused with "Invocation with on-demand
-    # throughput isn't supported. Retry with the ID or ARN of an inference
-    # profile." Sonnet 5 because it is what this account allows -- which is
-    # also what plan §10 named for stages ① and ②.
-    bedrock_model_id: str = "us.anthropic.claude-sonnet-5"
-    # Cohere rather than Titan: it is the embedding model this account allows.
-    # 1024 dimensions to match `templates.embedding VECTOR(1024)` in plan §8 --
-    # v4 is Matryoshka-trained, so 1024 is a supported output width and not a
-    # truncation.
-    bedrock_embedding_model_id: str = "cohere.embed-v4:0"
+    # ── LLM proxy ─────────────────────────────────────────────────────────
+    # An OpenAI-API-compatible local proxy, not Bedrock. Kept separate from S3
+    # credentials on purpose, same as Bedrock was: different service, different
+    # key, no reason to couple their configuration.
+    llm_base_url: str = "http://localhost:3001/v1"
+    llm_api_key: str
+    # "auto" lets the proxy pick a default chat backend.
+    llm_chat_model: str = "auto"
+    # Pinned rather than "auto": the proxy's own default embedding family is
+    # gemini-embedding-001 at 3072 dimensions, which would not fit the existing
+    # `templates.embedding VECTOR(1024)` column. nv-embedqa-e5-v5 is 1024-dim
+    # and free (nvidia backend) -- bge-m3/qwen3-embedding-0.6b are also
+    # 1024-dim but their no-key providers were failing ("no usable keys") on
+    # this proxy instance at setup time; nv-embedqa-e5-v5 was the one that
+    # actually worked when this was verified.
+    llm_embedding_model: str = "nv-embedqa-e5-v5"
     embedding_dimensions: int = 1024
-    bedrock_timeout_seconds: float = 120.0
-    bedrock_max_retries: int = 3
+    llm_timeout_seconds: float = 120.0
 
     max_upload_size_mb: int = 25
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
@@ -124,18 +114,6 @@ class Settings(BaseSettings):
                 "(`python -c \"import secrets; print(secrets.token_urlsafe(48))\"`)."
             )
         return self
-
-    @property
-    def resolved_bedrock_region(self) -> str:
-        return self.bedrock_region or self.aws_region
-
-    @property
-    def resolved_bedrock_access_key_id(self) -> str | None:
-        return self.bedrock_access_key_id or self.aws_access_key_id
-
-    @property
-    def resolved_bedrock_secret_access_key(self) -> str | None:
-        return self.bedrock_secret_access_key or self.aws_secret_access_key
 
 
 settings = Settings()

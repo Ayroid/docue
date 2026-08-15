@@ -135,7 +135,7 @@ def enrich(data: bytes, fmt: str, *, filename: str, form_id: str | None = None) 
         embedding_source=text,
         regions_labelled=labelled,
         regions_write_refused=len(classification.refused_writes),
-        model_id=settings.bedrock_model_id,
+        model_id=settings.llm_chat_model,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
         warnings=warnings,
     )

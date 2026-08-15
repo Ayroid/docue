@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import settings
-from app.storage.s3 import get_s3_client, upload_file
+from app.storage.s3 import ensure_bucket, get_s3_client, upload_file
 
 MIME_TYPES = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -28,6 +28,7 @@ def main() -> int:
     content_type = MIME_TYPES.get(path.suffix.lower(), "application/octet-stream")
     key = f"test-uploads/{path.name}"
 
+    ensure_bucket()
     print(f"Uploading {path.name} ({path.stat().st_size} bytes) to s3://{settings.s3_bucket_name}/{key} ...")
     try:
         with path.open("rb") as f:

@@ -260,8 +260,8 @@ def test_public_templates_behave_exactly_as_before(
 ) -> None:
     """Adding access control changed nothing for any template nobody restricted.
 
-    Every existing row is `public` -- migration 0008 defaults the column and
-    backfills it -- so this equivalence over the whole matrix is the no-regression
+    Every existing row is `public` -- the baseline migration defaults the
+    column -- so this equivalence over the whole matrix is the no-regression
     claim for the entire corpus.
     """
     tmpl = template(VISIBILITY_PUBLIC, owner_id=owner_id)

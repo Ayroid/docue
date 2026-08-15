@@ -41,12 +41,39 @@ def _ca_bundle_path() -> str:
 def get_s3_client():
     return boto3.client(
         "s3",
+        endpoint_url=settings.s3_endpoint_url,
         region_name=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"} if settings.s3_endpoint_url else {},
+        ),
         verify=_ca_bundle_path(),
     )
+
+
+def ensure_bucket() -> None:
+    """Create the configured bucket if it does not exist yet.
+
+    Idempotent and safe on every startup: `head_bucket` is cheap, and MinIO
+    returns a plain 404 when the bucket is missing, so `create_bucket` on 404
+    is reliable here. Only meaningful against MinIO/local dev -- against real
+    AWS S3 the bucket is expected to already exist and this becomes a
+    harmless extra `head_bucket` call.
+    """
+    client = get_s3_client()
+    bucket = settings.s3_bucket_name
+    try:
+        client.head_bucket(Bucket=bucket)
+    except ClientError as exc:
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if status != 404:
+            raise RuntimeError(f"could not check bucket '{bucket}': {exc}") from exc
+        try:
+            client.create_bucket(Bucket=bucket)
+        except (BotoCoreError, ClientError) as create_exc:
+            raise RuntimeError(f"could not create bucket '{bucket}': {create_exc}") from create_exc
 
 
 def upload_file(fileobj: BinaryIO, key: str, content_type: str) -> None:
