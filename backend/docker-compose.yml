@@ -1,3 +1,9 @@
+# Pinned so the volume names never depend on what the checkout directory is
+# called. Without this, Compose derives the project name from the directory,
+# and renaming or moving the repo silently starts a fresh, empty database
+# instead of reusing the existing one.
+name: docue
+
 services:
   minio:
     image: quay.io/minio/minio
