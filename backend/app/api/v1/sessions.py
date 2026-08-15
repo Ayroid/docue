@@ -48,6 +48,7 @@ from app.conversation.context import assemble_context
 from app.conversation.deriver import derive_values
 from app.conversation.extractor import extract_answer
 from app.conversation.notes_text import extract_note_text
+from app.conversation.phrasing import rephrase
 from app.conversation.planner import PlannedQuestion, plan_questions
 from app.conversation.scope import addressable_ids, askable, askable_ids
 from app.conversation.state import (
@@ -221,8 +222,63 @@ def _skipped_regions(
     return skipped - answered
 
 
-def _question_out(question: PlannedQuestion) -> QuestionOut:
-    return QuestionOut(**question.as_dict())
+def _phrasings(session: GenerationSession) -> dict[str, Any]:
+    return (session.known_context or {}).get("phrasing") or {}
+
+
+def _question_out(question: PlannedQuestion, said: dict[str, Any] | None = None) -> QuestionOut:
+    """The question as the client should see it.
+
+    `said` is the phrasing this session settled on when the question came up.
+    Stored rather than recomputed so a reload, a poll and the original response
+    all show the same sentence -- a question that rewords itself under the user
+    reads as the assistant changing its mind.
+    """
+    data = question.as_dict()
+    spoken = (said or {}).get(question.question_id)
+    if isinstance(spoken, dict) and spoken.get("question_text"):
+        data["question_text"] = spoken["question_text"]
+        if spoken.get("hint"):
+            data["hint"] = spoken["hint"]
+    return QuestionOut(**data)
+
+
+def _speak_current(
+    session: GenerationSession,
+    schema: Any,
+    questions: list[PlannedQuestion],
+    template: Template,
+) -> None:
+    """Phrase the question that has just become current, once.
+
+    Called at the moment a question comes up, never on a read. The interview's
+    *coverage* is the planner's and is cached per version; only the sentence is
+    decided here, and only when there is something known worth mentioning --
+    `rephrase` returns None on a cold start, which costs no model call at all.
+    """
+    current = _current(session, questions)
+    if current is None:
+        return
+    said = _phrasings(session)
+    if current.question_id in said:
+        return
+
+    spoken = rephrase(
+        schema,
+        current,
+        filled=session.filled_values or {},
+        turns=session.turns,
+        template_meta=_template_meta(template),
+    )
+    if spoken is None:
+        return
+
+    text, hint = spoken
+    session.known_context = {
+        **(session.known_context or {}),
+        "phrasing": {**said, current.question_id: {"question_text": text, "hint": hint}},
+    }
+    logger.info("session %s phrased %s in context", session.id, current.question_id)
 
 
 def _current(
@@ -278,6 +334,7 @@ def _session_out(
     **extra: Any,
 ) -> Any:
     current = _current(session, questions)
+    said = _phrasings(session)
     return cls(
         session_id=session.id,
         template_id=session.template_id,
@@ -286,8 +343,8 @@ def _session_out(
         tier=session.tier,
         intent=session.user_intent,
         status=session.status,
-        questions=[_question_out(q) for q in questions],
-        current_question=_question_out(current) if current else None,
+        questions=[_question_out(q, said) for q in questions],
+        current_question=_question_out(current, said) if current else None,
         turns=[TurnOut(**t) for t in (session.turns or [])],
         filled_values=session.filled_values or {},
         derived_values=(session.derived_values or {}).get("values", {}),
@@ -432,6 +489,12 @@ def start_session(
     # The frozen list, not the cached one: `covers_regions` is narrowed and
     # `prefilled_regions` is populated, and every later route reads the same way.
     questions = session_questions(session, db)
+
+    # Only speaks when the notes actually supplied something -- on a cold start
+    # `rephrase` returns None without calling a model, so an ordinary session
+    # costs exactly what it did before.
+    _speak_current(session, schema, questions, template)
+    db.commit()
 
     degraded = bool(context.errors or planner_errors)
     summary = (
@@ -606,6 +669,12 @@ def answer(
                 "rather than derived — you can fill them on the review screen."
             )
 
+    # Said now, on the turn the user is already waiting through, rather than on
+    # the next request -- the question and the answer that prompted it arrive
+    # together. `next_question` is unchanged by this: phrasing writes a sentence,
+    # never a pointer.
+    _speak_current(session, schema, questions, template)
+    said = _phrasings(session)
     db.commit()
     db.refresh(session)
 
@@ -615,7 +684,7 @@ def answer(
         volunteered=volunteered,
         chips=chips,
         derived=derived_out,
-        next_question=_question_out(next_question) if next_question else None,
+        next_question=_question_out(next_question, said) if next_question else None,
         progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
         degraded=degraded,
         warnings=warnings,
@@ -712,7 +781,7 @@ def instruct(
         volunteered=volunteered,
         chips=chips,
         derived={},
-        next_question=_question_out(pending) if pending else None,
+        next_question=_question_out(pending, _phrasings(session)) if pending else None,
         progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
         degraded=degraded,
         warnings=warnings,
@@ -828,7 +897,7 @@ async def add_notes(
         volunteered={},
         chips=chips,
         derived={},
-        next_question=_question_out(pending) if pending else None,
+        next_question=_question_out(pending, _phrasings(session)) if pending else None,
         progress=ProgressOut(**_progress(session, questions, schema).as_dict()),
         degraded=degraded,
         warnings=warnings,
