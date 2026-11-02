@@ -1,7 +1,6 @@
 # Docue — Frontend
 
-React interface for Docue, a document template hub built for the YMSLI
-hackathon. Users search a library of templates by meaning, answer a short
+React interface for Docue, a document template hub. Users search a library of templates by meaning, answer a short
 interview about the one they picked, and get back a filled document with the
 original's formatting intact.
 

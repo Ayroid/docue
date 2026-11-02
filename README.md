@@ -1,6 +1,6 @@
 # Docue
 
-A document template hub, built for the YMSLI hackathon.
+A document template hub that turns documents you already use into reusable templates.
 
 Someone uploads a `.docx`, `.pptx`, or `.xlsx` they already use — a report, a
 proposal, a workshop readout. Docue works out which parts of it are the

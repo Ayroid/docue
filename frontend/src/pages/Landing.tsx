@@ -202,7 +202,6 @@ export function Landing() {
             </div>
             <span className="font-heading text-[16px]">YMSLI Template Hub</span>
           </div>
-          <div className="text-[13px] opacity-55">AI Hackathon 2026 · PS-08</div>
         </div>
         {FOOTER_COLUMNS.map((col) => (
           <div key={col.heading} className="flex flex-col gap-[9px] text-[14px] items-center">

@@ -1,7 +1,6 @@
 # Docue — Backend
 
-FastAPI service behind Docue, a document template hub built for the YMSLI
-hackathon. It ingests office documents, works out which parts of them are
+FastAPI service behind Docue, a document template hub. It ingests office documents, works out which parts of them are
 variable, interviews a user to fill those parts in, and compiles a new document
 that keeps the original's formatting intact.
 

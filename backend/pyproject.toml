@@ -1,7 +1,7 @@
 [project]
 name = "docue-backend"
 version = "0.1.0"
-description = "Backend for Ymsli Hackethon"
+description = "Backend for Docue, a document template hub"
 authors = [
     { name = "ayroid", email = "ayushsk0000@gmail.com" }
 ]

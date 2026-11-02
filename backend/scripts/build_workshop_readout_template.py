@@ -3,7 +3,7 @@
     uv run python scripts/build_workshop_readout_template.py
 
 The must-have covers Word, Excel *and* PowerPoint, but YMSLI supplied no pptx
-template -- only a hackathon introduction deck, which is a presentation, not a
+template -- only an introduction deck, which is a presentation, not a
 form to generate from. Plan §1.5 calls for building one, and this script is it
 rather than a committed binary: a generated artifact stays reviewable, and the
 deck's content comes from the real corpus so the demo doesn't look synthetic.
